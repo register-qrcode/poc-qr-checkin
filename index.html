@@ -1,968 +1,508 @@
 <!DOCTYPE html>
-<html lang="id">
-
+<html>
 <head>
+  <base target="_top">
 
-  <meta charset="UTF-8">
-
-  <meta
-    name="viewport"
-    content="width=device-width, initial-scale=1.0"
-  >
-
-  <title>PoC QR CHECK-IN</title>
-
-
-  <!-- HTML5 QR Code Scanner -->
-
-  <script
-    src="https://unpkg.com/html5-qrcode"
-  ></script>
-
+  <meta name="viewport"
+        content="width=device-width, initial-scale=1">
 
   <style>
-
     * {
       box-sizing: border-box;
     }
 
-
     body {
-
       margin: 0;
-
       padding: 20px;
-
-      font-family:
-        Arial,
-        Helvetica,
-        sans-serif;
-
+      font-family: Arial, sans-serif;
       background: #f4f6f8;
-
       color: #1f2937;
-
     }
-
 
     .container {
-
       max-width: 520px;
-
       margin: 0 auto;
-
     }
-
 
     .card {
-
-      background: #ffffff;
-
-      border-radius: 18px;
-
-      padding: 22px;
-
-      box-shadow:
-        0 5px 20px
-        rgba(0, 0, 0, 0.08);
-
+      background: white;
+      border-radius: 16px;
+      padding: 24px;
+      box-shadow: 0 5px 20px rgba(0,0,0,0.08);
     }
-
 
     h1 {
-
       margin: 0 0 6px;
-
-      font-size: 25px;
-
+      text-align: center;
+      font-size: 24px;
     }
-
 
     .subtitle {
-
-      color: #6b7280;
-
-      margin-bottom: 22px;
-
-    }
-
-
-    .scanner-title {
-
-      font-size: 17px;
-
-      font-weight: bold;
-
-      margin-bottom: 12px;
-
-    }
-
-
-    #reader {
-
-      width: 100%;
-
-      overflow: hidden;
-
-      border-radius: 14px;
-
-    }
-
-
-    .instruction {
-
-      margin-top: 16px;
-
-      padding: 14px;
-
-      background: #f9fafb;
-
-      border-radius: 10px;
-
       text-align: center;
-
-      color: #4b5563;
-
-      font-size: 14px;
-
+      color: #6b7280;
+      margin-bottom: 24px;
     }
 
+    label {
+      display: block;
+      font-weight: bold;
+      margin-bottom: 8px;
+    }
+
+    input {
+      width: 100%;
+      padding: 14px;
+      border: 1px solid #d1d5db;
+      border-radius: 10px;
+      font-size: 16px;
+      margin-bottom: 12px;
+    }
+
+    button {
+      width: 100%;
+      padding: 14px;
+      border: 0;
+      border-radius: 10px;
+      background: #111827;
+      color: white;
+      font-size: 16px;
+      font-weight: bold;
+      cursor: pointer;
+    }
+
+    button:disabled {
+      opacity: 0.6;
+    }
 
     .result {
-
-      display: none;
-
-      margin-top: 18px;
-
+      margin-top: 20px;
       padding: 18px;
-
       border-radius: 12px;
-
+      display: none;
     }
-
 
     .success {
-
-      background: #ecfdf5;
-
-      border: 1px solid #10b981;
-
-      color: #065f46;
-
+      background: #dcfce7;
+      border: 1px solid #86efac;
+      color: #166534;
     }
-
 
     .warning {
-
-      background: #fffbeb;
-
-      border: 1px solid #f59e0b;
-
+      background: #fef3c7;
+      border: 1px solid #fcd34d;
       color: #92400e;
-
     }
-
 
     .error {
-
-      background: #fef2f2;
-
-      border: 1px solid #ef4444;
-
+      background: #fee2e2;
+      border: 1px solid #fca5a5;
       color: #991b1b;
-
     }
-
 
     .result-title {
-
-      font-size: 21px;
-
+      font-size: 22px;
       font-weight: bold;
-
-      margin-bottom: 12px;
-
+      margin-bottom: 14px;
     }
 
-
-    .detail {
-
+    .data-row {
       margin: 7px 0;
-
     }
 
-
-    .status {
-
-      margin-top: 18px;
-
-      text-align: center;
-
-      color: #6b7280;
-
-      font-size: 13px;
-
-    }
-
-
-    .reset-button {
-
-      width: 100%;
-
-      margin-top: 15px;
-
-      padding: 13px;
-
-      border: 0;
-
-      border-radius: 10px;
-
-      background: #111827;
-
-      color: #ffffff;
-
-      font-size: 15px;
-
+    .data-label {
       font-weight: bold;
-
-      cursor: pointer;
-
-      display: none;
-
     }
 
+    .bridge-status {
+      margin-top: 12px;
+      font-size: 12px;
+      color: #6b7280;
+      text-align: center;
+    }
   </style>
-
 </head>
-
 
 <body>
 
-
 <div class="container">
-
 
   <div class="card">
 
-
-    <h1>
-      PoC QR CHECK-IN
-    </h1>
-
+    <h1>PoC QR CHECK-IN</h1>
 
     <div class="subtitle">
-      Scanner Petugas
+      Panel Petugas
     </div>
 
+    <!--
+      INPUT MANUAL
+      Tetap dipertahankan sebagai backup.
+    -->
 
-    <div class="scanner-title">
-      Scan QR Code Peserta
-    </div>
+    <label for="token">
+      QR Token
+    </label>
 
+    <input
+      id="token"
+      type="text"
+      placeholder="Masukkan QR Token"
+      autocomplete="off"
+    >
 
-    <!-- AREA KAMERA -->
-
-    <div id="reader"></div>
-
-
-    <div class="instruction">
-
-      Arahkan kamera HP ke QR Code peserta.
-
-      <br><br>
-
-      Scanner akan membaca QR Code secara otomatis.
-
-    </div>
-
-
-    <!-- HASIL CHECK-IN -->
+    <button id="checkButton" onclick="manualCheckIn()">
+      CHECK-IN
+    </button>
 
     <div
       id="result"
-      class="result"
-    >
-
-      <div
-        id="resultTitle"
-        class="result-title"
-      ></div>
-
-
-      <div
-        id="resultContent"
-      ></div>
-
+      class="result">
     </div>
-
-
-    <button
-      id="resetButton"
-      class="reset-button"
-      onclick="resetScanner()"
-    >
-      SCAN PESERTA BERIKUTNYA
-    </button>
-
 
     <div
-      id="status"
-      class="status"
-    >
-      Menyiapkan kamera...
+      id="bridgeStatus"
+      class="bridge-status">
+      Menunggu scanner...
     </div>
 
-
   </div>
-
 
 </div>
 
 
-<!-- =================================================
-     APPS SCRIPT WEB APP
-     ================================================= -->
-
-<iframe
-  id="appsScriptFrame"
-  src="https://script.google.com/macros/s/AKfycbwbLyCiePd1Vw3CgxBz0GdSDgaxTWI8Fsg7XUaKYJIouqDK0qlEtgkINVVq0ZsFR_gCMg/exec"
-  style="
-    position:absolute;
-    width:1px;
-    height:1px;
-    border:0;
-    opacity:0;
-    pointer-events:none;
-  "
-></iframe>
-
-
 <script>
 
+/* =========================================================
+   BRIDGE DARI GITHUB PAGES SCANNER
+   ========================================================= */
 
-// =====================================================
-// KONFIGURASI
-// =====================================================
+window.addEventListener('message', function(event) {
 
-const APPS_SCRIPT_ORIGIN =
-  'https://script.google.com';
-
-
-// =====================================================
-// VARIABLE
-// =====================================================
-
-let scanner = null;
-
-let isProcessing = false;
-
-
-// =====================================================
-// MULAI SCANNER
-// =====================================================
-
-function startScanner() {
-
-
-  if (scanner) {
+  /*
+   * Hanya menerima pesan dari GitHub Pages kita.
+   */
+  if (
+    event.origin !==
+    'https://register-qrcode.github.io'
+  ) {
     return;
   }
 
-
-  scanner =
-    new Html5Qrcode(
-      'reader'
-    );
-
-
-  const config = {
-
-    fps: 10,
-
-    qrbox: {
-      width: 250,
-      height: 250
-    },
-
-    aspectRatio: 1.0
-
-  };
-
-
-  setStatus(
-    'Meminta izin kamera...'
-  );
-
-
-  scanner
-    .start(
-
-      {
-        facingMode:
-          'environment'
-      },
-
-      config,
-
-      onScanSuccess,
-
-      onScanError
-
-    )
-
-    .then(
-      function() {
-
-        setStatus(
-          'Kamera aktif. Arahkan ke QR Code peserta.'
-        );
-
-      }
-    )
-
-    .catch(
-      function(error) {
-
-        console.error(error);
-
-        setStatus(
-          'Kamera tidak dapat digunakan. Pastikan izin kamera diberikan.'
-        );
-
-      }
-    );
-
-}
-
-
-// =====================================================
-// QR BERHASIL DIBACA
-// =====================================================
-
-function onScanSuccess(
-  decodedText,
-  decodedResult
-) {
-
-
-  if (isProcessing) {
+  /*
+   * Pastikan pesan berasal dari parent window.
+   */
+  if (event.source !== window.parent) {
     return;
   }
 
+  var data = event.data || {};
 
-  isProcessing = true;
-
-
-  console.log(
-    'QR Token:',
-    decodedText
-  );
-
-
-  setStatus(
-    'QR terbaca. Memeriksa data peserta...'
-  );
-
-
-  // Hentikan scanner sementara
-
-  if (scanner) {
-
-    scanner
-      .stop()
-      .catch(
-        function(error) {
-
-          console.log(
-            'Scanner stop:',
-            error
-          );
-
-        }
-      );
-
-  }
-
-
-  // Kirim token ke Apps Script
-
-  sendTokenToAppsScript(
-    decodedText
-  );
-
-}
-
-
-// =====================================================
-// ERROR SCAN
-// =====================================================
-
-function onScanError(
-  errorMessage
-) {
-
-  // Tidak perlu menampilkan error.
-  // Scanner akan terus mencari QR.
-
-}
-
-
-// =====================================================
-// KIRIM TOKEN KE APPS SCRIPT
-// =====================================================
-
-function sendTokenToAppsScript(
-  token
-) {
-
-
-  const frame =
-    document.getElementById(
-      'appsScriptFrame'
-    );
-
-
-  if (!frame) {
-
-    showResult(
-
-      'error',
-
-      'ERROR SISTEM',
-
-      'Koneksi ke sistem check-in tidak tersedia.'
-
-    );
-
+  if (data.type !== 'QR_SCANNED') {
     return;
-
   }
 
+  var token = String(data.token || '').trim();
 
-  frame.contentWindow.postMessage(
+  if (!token) {
+    sendResultToScanner({
+      status: 'INVALID',
+      message: 'QR Token kosong.'
+    });
+    return;
+  }
 
+  document.getElementById('bridgeStatus').innerText =
+    'QR diterima. Memeriksa data...';
+
+  /*
+   * Kirim token ke Apps Script server.
+   */
+  google.script.run
+
+    .withSuccessHandler(function(result) {
+
+      document.getElementById('bridgeStatus').innerText =
+        'Pemeriksaan selesai.';
+
+      sendResultToScanner(result);
+
+    })
+
+    .withFailureHandler(function(error) {
+
+      var message =
+        error && error.message
+          ? error.message
+          : 'Terjadi kesalahan pada server.';
+
+      sendResultToScanner({
+        status: 'ERROR',
+        message: message
+      });
+
+    })
+
+    .processCameraData(token);
+
+});
+
+
+/* =========================================================
+   KIRIM HASIL KEMBALI KE GITHUB PAGES
+   ========================================================= */
+
+function sendResultToScanner(result) {
+
+  window.parent.postMessage(
     {
-      type:
-        'QR_SCANNED',
-
-      token:
-        token
+      type: 'CHECKIN_RESULT',
+      result: result
     },
-
-    APPS_SCRIPT_ORIGIN
-
+    'https://register-qrcode.github.io'
   );
 
 }
 
 
-// =====================================================
-// MENERIMA HASIL DARI APPS SCRIPT
-// =====================================================
+/* =========================================================
+   MANUAL CHECK-IN
+   ========================================================= */
 
-window.addEventListener(
-  'message',
-  function(event) {
+function manualCheckIn() {
 
+  var token =
+    document.getElementById('token').value.trim();
 
-    if (!event.data) {
-      return;
-    }
+  if (!token) {
 
+    showResult({
+      status: 'INVALID',
+      message: 'Silakan masukkan QR Token.'
+    });
 
-    if (
-      event.data.type !==
-      'CHECKIN_RESULT'
-    ) {
-
-      return;
-
-    }
-
-
-    handleCheckInResult(
-      event.data.result
-    );
-
+    return;
   }
-);
+
+  var button =
+    document.getElementById('checkButton');
+
+  button.disabled = true;
+  button.innerText = 'MEMERIKSA...';
+
+  google.script.run
+
+    .withSuccessHandler(function(result) {
+
+      button.disabled = false;
+      button.innerText = 'CHECK-IN';
+
+      showResult(result);
+
+    })
+
+    .withFailureHandler(function(error) {
+
+      button.disabled = false;
+      button.innerText = 'CHECK-IN';
+
+      showResult({
+        status: 'ERROR',
+        message:
+          error && error.message
+            ? error.message
+            : 'Terjadi kesalahan.'
+      });
+
+    })
+
+    .processCameraData(token);
+
+}
 
 
-// =====================================================
-// HASIL CHECK-IN
-// =====================================================
+/* =========================================================
+   TAMPILKAN HASIL
+   ========================================================= */
 
-function handleCheckInResult(
-  result
-) {
+function showResult(result) {
 
+  var box =
+    document.getElementById('result');
 
   if (!result) {
 
-    showResult(
+    box.className =
+      'result error';
 
-      'error',
+    box.innerHTML =
+      '<div class="result-title">ERROR</div>' +
+      '<div>Hasil pemeriksaan kosong.</div>';
 
-      'ERROR SISTEM',
-
-      'Tidak ada respons dari server.'
-
-    );
+    box.style.display = 'block';
 
     return;
-
   }
 
 
-  // ---------------------------------------------------
-  // CHECK-IN BERHASIL
-  // ---------------------------------------------------
+  /* ==========================================
+     CHECK-IN BERHASIL
+     ========================================== */
 
   if (
-    result.status ===
-    'CHECKED_IN'
+    result.status === 'CHECKED_IN' ||
+    result.status === 'SUCCESS'
   ) {
 
+    box.className =
+      'result success';
 
-    const content = `
+    box.innerHTML =
 
-      <div class="detail">
+      '<div class="result-title">' +
+      'CHECK-IN BERHASIL' +
+      '</div>' +
 
-        <strong>Nama:</strong><br>
+      '<div class="data-row">' +
+      '<span class="data-label">Nama:</span> ' +
+      escapeHtml(result.name || '-') +
+      '</div>' +
 
-        ${escapeHtml(
-          result.name || '-'
-        )}
+      '<div class="data-row">' +
+      '<span class="data-label">Instansi:</span> ' +
+      escapeHtml(result.institution || '-') +
+      '</div>' +
 
-      </div>
+      '<div class="data-row">' +
+      '<span class="data-label">Registration ID:</span> ' +
+      escapeHtml(result.registrationId || '-') +
+      '</div>' +
 
+      '<div class="data-row">' +
+      '<span class="data-label">Check-in:</span> ' +
+      escapeHtml(result.checkInTime || '-') +
+      '</div>';
 
-      <div class="detail">
-
-        <strong>Instansi:</strong><br>
-
-        ${escapeHtml(
-          result.institution || '-'
-        )}
-
-      </div>
-
-
-      <div class="detail">
-
-        <strong>Registration ID:</strong><br>
-
-        ${escapeHtml(
-          result.registrationId || '-'
-        )}
-
-      </div>
-
-
-      <div class="detail">
-
-        <strong>Check-in:</strong><br>
-
-        ${escapeHtml(
-          result.checkInTime || '-'
-        )}
-
-      </div>
-
-    `;
-
-
-    showResult(
-
-      'success',
-
-      'CHECK-IN BERHASIL',
-
-      content
-
-    );
-
-
-    document
-      .getElementById(
-        'resetButton'
-      )
-      .style.display =
-      'block';
-
+    box.style.display = 'block';
 
     return;
-
   }
 
 
-  // ---------------------------------------------------
-  // SUDAH CHECK-IN
-  // ---------------------------------------------------
+  /* ==========================================
+     SUDAH CHECK-IN SEBELUMNYA
+     ========================================== */
 
   if (
-    result.status ===
-    'ALREADY_CHECKED_IN'
+    result.status === 'ALREADY_CHECKED_IN'
   ) {
 
+    box.className =
+      'result warning';
 
-    const content = `
+    box.innerHTML =
 
-      <div class="detail">
+      '<div class="result-title">' +
+      'SUDAH CHECK-IN' +
+      '</div>' +
 
-        <strong>Nama:</strong><br>
+      '<div class="data-row">' +
+      '<span class="data-label">Nama:</span> ' +
+      escapeHtml(result.name || '-') +
+      '</div>' +
 
-        ${escapeHtml(
-          result.name || '-'
-        )}
+      '<div class="data-row">' +
+      '<span class="data-label">Instansi:</span> ' +
+      escapeHtml(result.institution || '-') +
+      '</div>' +
 
-      </div>
+      '<div class="data-row">' +
+      '<span class="data-label">Registration ID:</span> ' +
+      escapeHtml(result.registrationId || '-') +
+      '</div>' +
 
+      '<div class="data-row">' +
+      '<span class="data-label">Check-in sebelumnya:</span> ' +
+      escapeHtml(result.checkInTime || '-') +
+      '</div>';
 
-      <div class="detail">
-
-        <strong>Registration ID:</strong><br>
-
-        ${escapeHtml(
-          result.registrationId || '-'
-        )}
-
-      </div>
-
-
-      <div class="detail">
-
-        <strong>Check-in sebelumnya:</strong><br>
-
-        ${escapeHtml(
-          result.checkInTime || '-'
-        )}
-
-      </div>
-
-    `;
-
-
-    showResult(
-
-      'warning',
-
-      'SUDAH CHECK-IN',
-
-      content
-
-    );
-
-
-    document
-      .getElementById(
-        'resetButton'
-      )
-      .style.display =
-      'block';
-
+    box.style.display = 'block';
 
     return;
-
   }
 
 
-  // ---------------------------------------------------
-  // QR INVALID
-  // ---------------------------------------------------
+  /* ==========================================
+     QR TIDAK VALID
+     ========================================== */
 
-  showResult(
+  if (
+    result.status === 'INVALID' ||
+    result.status === 'INVALID_STATUS'
+  ) {
 
-    'error',
+    box.className =
+      'result error';
 
-    'QR TIDAK VALID',
+    box.innerHTML =
 
+      '<div class="result-title">' +
+      'QR TIDAK VALID' +
+      '</div>' +
+
+      '<div>' +
+      escapeHtml(
+        result.message ||
+        'QR Code tidak dapat diverifikasi.'
+      ) +
+      '</div>';
+
+    box.style.display = 'block';
+
+    return;
+  }
+
+
+  /* ==========================================
+     ERROR
+     ========================================== */
+
+  box.className =
+    'result error';
+
+  box.innerHTML =
+
+    '<div class="result-title">' +
+    'ERROR' +
+    '</div>' +
+
+    '<div>' +
     escapeHtml(
-
       result.message ||
-      'QR Code tidak terdaftar.'
+      'Terjadi kesalahan.'
+    ) +
+    '</div>';
 
-    )
-
-  );
-
-
-  document
-    .getElementById(
-      'resetButton'
-    )
-    .style.display =
-    'block';
+  box.style.display = 'block';
 
 }
 
 
-// =====================================================
-// RESET SCANNER
-// =====================================================
+/* =========================================================
+   SECURITY
+   ========================================================= */
 
-function resetScanner() {
+function escapeHtml(value) {
 
-
-  isProcessing =
-    false;
-
-
-  document
-    .getElementById(
-      'resetButton'
-    )
-    .style.display =
-    'none';
-
-
-  document
-    .getElementById(
-      'result'
-    )
-    .style.display =
-    'none';
-
-
-  document
-    .getElementById(
-      'status'
-    )
-    .innerText =
-    'Menyiapkan kamera...';
-
-
-  scanner =
-    null;
-
-
-  startScanner();
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
 
 }
-
-
-// =====================================================
-// TAMPILKAN HASIL
-// =====================================================
-
-function showResult(
-  type,
-  title,
-  content
-) {
-
-
-  const result =
-    document.getElementById(
-      'result'
-    );
-
-
-  const resultTitle =
-    document.getElementById(
-      'resultTitle'
-    );
-
-
-  const resultContent =
-    document.getElementById(
-      'resultContent'
-    );
-
-
-  result.className =
-    'result ' + type;
-
-
-  resultTitle.innerHTML =
-    title;
-
-
-  resultContent.innerHTML =
-    content;
-
-
-  result.style.display =
-    'block';
-
-}
-
-
-// =====================================================
-// STATUS
-// =====================================================
-
-function setStatus(
-  message
-) {
-
-  document
-    .getElementById(
-      'status'
-    )
-    .innerText =
-    message;
-
-}
-
-
-// =====================================================
-// ESCAPE HTML
-// =====================================================
-
-function escapeHtml(
-  value
-) {
-
-  return String(
-    value || ''
-  )
-
-    .replace(
-      /&/g,
-      '&amp;'
-    )
-
-    .replace(
-      /</g,
-      '&lt;'
-    )
-
-    .replace(
-      />/g,
-      '&gt;'
-    )
-
-    .replace(
-      /"/g,
-      '&quot;'
-    )
-
-    .replace(
-      /'/g,
-      '&#039;'
-    );
-
-}
-
-
-// =====================================================
-// START
-// =====================================================
-
-window.addEventListener(
-  'load',
-  function() {
-
-    startScanner();
-
-  }
-);
-
 
 </script>
 
-
 </body>
-
 </html>
