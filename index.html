@@ -271,18 +271,21 @@ let beepAudioSuccess = null;
 let beepAudioWarn = null;
 let currentAudio = null;
 let audioRequestId = 0;
+let audioPlayedForRequest = 0;
+let expectGeminiAudio = false;
+let lastResultKey = '';
 
 document.getElementById('soundButton').addEventListener('click', toggleSound);
 document.getElementById('startButton').addEventListener('click', function () {
-  unlockAudio();
+  enableSoundFromGesture();
   startScanner();
 });
 document.getElementById('resetButton').addEventListener('click', function () {
-  unlockAudio();
+  enableSoundFromGesture();
   resetScanner();
 });
 document.getElementById('manualNextButton').addEventListener('click', function () {
-  unlockAudio();
+  enableSoundFromGesture();
   resetScanner();
 });
 document.getElementById('volumeSlider').addEventListener('input', function (event) {
@@ -629,6 +632,24 @@ function speakFailed() {
   }
 }
 
+function beginNewScanCycle() {
+  // Batalkan audio lama agar tidak nabrak scan berikutnya.
+  stopCurrentAudio();
+  expectGeminiAudio = false;
+  lastResultKey = '';
+  audioRequestId += 1;
+}
+
+function enableSoundFromGesture() {
+  soundEnabled = true;
+  var button = document.getElementById('soundButton');
+  if (button) {
+    button.classList.add('active');
+    button.innerText = 'SUARA AKTIF';
+  }
+  unlockAudio();
+}
+
 function formatCheckInTime(value) {
   var raw = String(value || '').trim();
   if (!raw || raw === '-') return '-';
@@ -667,7 +688,10 @@ function playGeminiWavBase64(wavBase64) {
     var playPromise = audio.play();
     if (playPromise && playPromise.catch) {
       playPromise.catch(function (error) {
-        console.log('Gemini audio play error:', error);
+        console.log(
+          'Gemini audio play blocked/failed (check-in tetap valid):',
+          error
+        );
       });
     }
   } catch (error) {
@@ -842,6 +866,7 @@ function readyForNextScan() {
   clearResponseTimer();
   isProcessing = false;
   hideResultPanel();
+  // Jangan stop audio di sini — biarkan TTS selesai kecuali scan baru mulai.
 
   if (!cameraRunning) {
     beginCamera();
@@ -865,6 +890,7 @@ function onScanSuccess(decodedText) {
   lastToken = token;
   lastTokenAt = now;
   isProcessing = true;
+  beginNewScanCycle();
 
   setStatus('Status: QR terbaca. Memeriksa data...');
   sendTokenToAppsScript(token);
@@ -937,22 +963,50 @@ window.addEventListener('message', function (event) {
 
 function handleCheckInAudio(audio) {
   if (!audio || !audio.wavBase64) return;
-  if (!soundEnabled || soundVolume <= 0) return;
 
-  // Satu hasil scan = satu audio (abaikan late response lama).
+  // Abaikan audio terlambat dari scan sebelumnya.
+  if (!expectGeminiAudio) {
+    console.log('Ignore stale Gemini audio (no pending result).');
+    return;
+  }
+
+  if (audio.requestId && Number(audio.requestId) !== audioRequestId) {
+    console.log('Ignore stale Gemini audio (requestId mismatch).');
+    return;
+  }
+
+  if (audio.resultKey && lastResultKey && audio.resultKey !== lastResultKey) {
+    console.log('Ignore stale Gemini audio (resultKey mismatch).');
+    return;
+  }
+
+  if (audioPlayedForRequest === audioRequestId) {
+    console.log('Ignore duplicate Gemini audio for same scan.');
+    return;
+  }
+
+  audioPlayedForRequest = audioRequestId;
+  expectGeminiAudio = false;
+
+  // Coba putar meskipun toggle belum ON jika user sudah gesture (kamera/tombol).
+  unlockAudio();
   playGeminiWavBase64(audio.wavBase64);
 }
 
 function handleCheckInResult(result) {
   clearResponseTimer();
   isProcessing = true;
-  audioRequestId += 1;
   stopCurrentAudio();
+  unlockAudio();
+
+  var requestIdForThisResult = audioRequestId;
+  expectGeminiAudio = false;
+  lastResultKey = '';
 
   if (!result) {
     showResult(
       'error',
-      '⚠ CHECK-IN TIDAK BERHASIL',
+      '✕ CHECK-IN TIDAK BERHASIL',
       'Tidak ada respons dari server.'
     );
     setStatus('Status: Gagal · siap scan berikutnya');
@@ -979,7 +1033,14 @@ function handleCheckInResult(result) {
     showResult('success', '✓ CHECK-IN BERHASIL', successContent);
     setStatus('Status: BERHASIL · siap scan berikutnya');
     vibrateSuccess();
-    // Audio Gemini dikirim async via CHECKIN_AUDIO (jangan block UI).
+
+    expectGeminiAudio = true;
+    lastResultKey =
+      'CHECKED_IN|' +
+      String(result.registrationId || '') +
+      '|' +
+      String(successName);
+    // Audio Gemini async via CHECKIN_AUDIO — UI tidak menunggu.
     return;
   }
 
@@ -990,9 +1051,9 @@ function handleCheckInResult(result) {
 
     var dupContent =
       '<div class="detail" style="text-align:center;margin-bottom:10px;">' +
-      'QR Code sudah pernah digunakan.' +
+      'QR Code sudah digunakan.' +
       '</div>' +
-      '<div class="detail" style="text-align:center;"><strong>Sudah check-in oleh:</strong></div>' +
+      '<div class="detail" style="text-align:center;"><strong>Sudah dipakai check-in oleh:</strong></div>' +
       '<div class="detail" style="text-align:center;font-size:18px;font-weight:bold;margin:8px 0;">' +
       escapeHtml(dupName) +
       '</div>' +
@@ -1000,14 +1061,19 @@ function handleCheckInResult(result) {
       escapeHtml(dupInstansi) +
       '</div>' +
       '<div class="detail" style="text-align:center;margin-top:12px;">' +
-      '<strong>Waktu check-in:</strong><br>' +
       escapeHtml(dupTime) +
       '</div>';
 
-    showResult('warning', '! CHECK-IN TIDAK BERHASIL', dupContent);
+    showResult('warning', '✕ CHECK-IN TIDAK BERHASIL', dupContent);
     setStatus('Status: SUDAH DIGUNAKAN · siap scan berikutnya');
     vibrateWarn();
-    // Audio Gemini async: "Sudah dipakai check-in oleh [NAMA]."
+
+    expectGeminiAudio = true;
+    lastResultKey =
+      'ALREADY_CHECKED_IN|' +
+      String(result.registrationId || '') +
+      '|' +
+      String(dupName);
     return;
   }
 
@@ -1024,7 +1090,7 @@ function handleCheckInResult(result) {
 
   showResult(
     'error',
-    '⚠ CHECK-IN TIDAK BERHASIL',
+    '✕ CHECK-IN TIDAK BERHASIL',
     escapeHtml(result.message || 'Silakan coba lagi.')
   );
   setStatus('Status: Gagal · siap scan berikutnya');
