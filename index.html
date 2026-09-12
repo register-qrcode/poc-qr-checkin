@@ -251,10 +251,10 @@
 const WEB_APP_URL =
   'https://script.google.com/macros/s/AKfycbwbLyCiePd1Vw3CgxBz0GdSDgaxTWI8Fsg7XUaKYJIOuqDK0qIEtgkINVVq0ZsFR_gCMg/exec';
 
-const RESPONSE_TIMEOUT_MS = 15000;
+const RESPONSE_TIMEOUT_MS = 12000;
 // Hanya beep — tanpa TTS. Panel singkat lalu siap scan lagi.
-const AUTO_NEXT_MS = 2500;
-const SAME_TOKEN_COOLDOWN_MS = 2500;
+const AUTO_NEXT_MS = 1200;
+const SAME_TOKEN_COOLDOWN_MS = 1200;
 
 let scanner = null;
 let cameraRunning = false;
@@ -278,6 +278,8 @@ let audioPlayedForRequest = 0;
 let expectGeminiAudio = false;
 let lastResultKey = '';
 let geminiAudioPlayed = false;
+let bridgeReady = false;
+let pendingBridgeToken = '';
 
 document.getElementById('soundButton').addEventListener('click', toggleSound);
 document.getElementById('startButton').addEventListener('click', function () {
@@ -1059,6 +1061,26 @@ function sendTokenToAppsScript(token) {
     });
   }, RESPONSE_TIMEOUT_MS);
 
+  // Bridge cepat: kirim token tanpa reload iframe (hindari jeda cold-start).
+  if (bridgeReady && frame.contentWindow) {
+    try {
+      frame.contentWindow.postMessage(
+        { type: 'CHECKIN_REQUEST', token: token },
+        '*'
+      );
+      return;
+    } catch (ePost) {
+      console.log('Bridge postMessage gagal, fallback reload:', ePost);
+    }
+  }
+
+  // Bridge belum siap: fallback URL ?token= (tetap andal).
+  sendTokenViaUrlFallback(token);
+}
+
+function sendTokenViaUrlFallback(token) {
+  const frame = document.getElementById('appsScriptFrame');
+  if (!frame) return;
   frame.src =
     WEB_APP_URL +
     '?token=' +
@@ -1073,6 +1095,26 @@ window.addEventListener('message', function (event) {
   }
 
   if (!isAllowedResultOrigin(event.origin)) {
+    return;
+  }
+
+  if (event.data.type === 'BRIDGE_READY') {
+    bridgeReady = true;
+    if (pendingBridgeToken) {
+      var queued = pendingBridgeToken;
+      pendingBridgeToken = '';
+      try {
+        var frameReady = document.getElementById('appsScriptFrame');
+        if (frameReady && frameReady.contentWindow) {
+          frameReady.contentWindow.postMessage(
+            { type: 'CHECKIN_REQUEST', token: queued },
+            '*'
+          );
+          return;
+        }
+      } catch (eReady) {}
+      sendTokenViaUrlFallback(queued);
+    }
     return;
   }
 
