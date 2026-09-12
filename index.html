@@ -317,6 +317,17 @@ document.getElementById('volumeSlider').addEventListener('input', function (even
   playBeep('success');
 });
 
+// Jaga AudioContext tetap hidup di HP (sering suspend saat idle).
+['pointerdown', 'touchstart', 'click'].forEach(function (evtName) {
+  document.addEventListener(
+    evtName,
+    function () {
+      if (soundEnabled) unlockAudio();
+    },
+    { passive: true }
+  );
+});
+
 function setStatus(message) {
   document.getElementById('status').innerText = message;
 }
@@ -348,8 +359,9 @@ function toggleSound() {
     button.classList.add('active');
     button.innerText = 'SUARA AKTIF';
     unlockAudio();
-    // Beep uji lokal (Gemini voice muncul saat scan check-in).
+    // Beep uji lokal — wajib terdengar setelah ketuk tombol.
     playBeep('success');
+    speakLocalIndonesian('Suara aktif.', true);
   } else {
     button.classList.remove('active');
     button.innerText = 'AKTIFKAN SUARA';
@@ -515,12 +527,68 @@ function unlockAudio() {
       }
     });
 
+    // Prime speechSynthesis saat gesture — async speak sering diblokir HP.
     if (window.speechSynthesis) {
       window.speechSynthesis.getVoices();
+      try {
+        var prime = new SpeechSynthesisUtterance(' ');
+        prime.volume = 0;
+        prime.rate = 2;
+        window.speechSynthesis.speak(prime);
+        window.speechSynthesis.cancel();
+      } catch (ePrime) {}
     }
   } catch (error) {
     console.log('Audio unlock:', error);
   }
+}
+
+function speakLocalIndonesian(text, force) {
+  if ((!soundEnabled && !force) || soundVolume <= 0) return;
+  text = String(text || '').trim();
+  if (!text || !window.speechSynthesis) return;
+
+  try {
+    if (audioCtx && audioCtx.state === 'suspended') {
+      audioCtx.resume();
+    }
+
+    window.speechSynthesis.cancel();
+
+    var utter = new SpeechSynthesisUtterance(text);
+    utter.lang = 'id-ID';
+    utter.rate = 1;
+    utter.pitch = 1;
+    utter.volume = Math.max(0.2, Math.min(1, soundVolume));
+
+    var voices = window.speechSynthesis.getVoices() || [];
+    var idVoice =
+      voices.find(function (v) {
+        return v.lang && v.lang.toLowerCase().indexOf('id') === 0;
+      }) ||
+      voices.find(function (v) {
+        return /indonesia/i.test(v.name || '');
+      });
+    if (idVoice) utter.voice = idVoice;
+
+    window.speechSynthesis.speak(utter);
+  } catch (error) {
+    console.log('speakLocalIndonesian error:', error);
+  }
+}
+
+/** Feedback lokal segera — tidak menunggu Gemini (sering 429 / lambat). */
+function playImmediateResultFeedback(kind, speechText) {
+  if (!soundEnabled || soundVolume <= 0) return;
+
+  try {
+    if (audioCtx && audioCtx.state === 'suspended') {
+      audioCtx.resume();
+    }
+  } catch (e) {}
+
+  playBeep(kind);
+  speakLocalIndonesian(speechText, false);
 }
 
 function playBeepWebAudio(kind) {
@@ -562,12 +630,20 @@ function playBeep(kind) {
   if (!soundEnabled || soundVolume <= 0) return;
 
   try {
-    unlockAudio();
     prepareHtmlAudio();
+
+    if (audioCtx && audioCtx.state === 'suspended') {
+      audioCtx.resume();
+    }
+
+    // WebAudio dulu — paling andal setelah unlock di HP (async postMessage).
+    playBeepWebAudio(kind === 'warn' || kind === 'failed' ? 'failed' : 'success');
 
     const audio = (kind === 'warn' || kind === 'failed')
       ? beepAudioWarn
       : beepAudioSuccess;
+
+    if (!audio) return;
 
     audio.pause();
     audio.currentTime = 0;
@@ -575,15 +651,10 @@ function playBeep(kind) {
     audio.volume = Math.max(0, Math.min(1, soundVolume));
 
     const playPromise = audio.play();
-    if (playPromise && playPromise.then) {
+    if (playPromise && playPromise.catch) {
       playPromise.catch(function () {
         playBeepWebAudio(kind);
       });
-    }
-
-    // Always also fire WebAudio for failed so difference is obvious.
-    if (kind === 'warn' || kind === 'failed') {
-      playBeepWebAudio('failed');
     }
   } catch (error) {
     console.log('Beep error:', error);
@@ -675,15 +746,56 @@ function playGeminiWavBase64(wavBase64) {
   if (!wavBase64) return;
 
   try {
-    unlockAudio();
+    if (audioCtx && audioCtx.state === 'suspended') {
+      audioCtx.resume();
+    }
+
+    // Hentikan suara lokal agar diganti Gemini jika berhasil.
+    if (window.speechSynthesis) {
+      window.speechSynthesis.cancel();
+    }
     stopCurrentAudio();
 
-    var audio = new Audio(
-      'data:audio/wav;base64,' + wavBase64
-    );
+    var binary = atob(wavBase64);
+    var bytes = new Uint8Array(binary.length);
+    for (var i = 0; i < binary.length; i++) {
+      bytes[i] = binary.charCodeAt(i);
+    }
+
+    // Prefer WebAudio decode — lebih tahan blokir autoplay di HP.
+    if (audioCtx && audioCtx.decodeAudioData) {
+      audioCtx.decodeAudioData(
+        bytes.buffer.slice(0),
+        function (buffer) {
+          var source = audioCtx.createBufferSource();
+          source.buffer = buffer;
+          if (masterGain) {
+            masterGain.gain.value = Math.max(0.0001, soundVolume);
+            source.connect(masterGain);
+          } else {
+            source.connect(audioCtx.destination);
+          }
+          source.start(0);
+        },
+        function () {
+          playGeminiViaHtmlAudio_(wavBase64);
+        }
+      );
+      return;
+    }
+
+    playGeminiViaHtmlAudio_(wavBase64);
+  } catch (error) {
+    console.log('playGeminiWavBase64 error:', error);
+    playGeminiViaHtmlAudio_(wavBase64);
+  }
+}
+
+function playGeminiViaHtmlAudio_(wavBase64) {
+  try {
+    var audio = new Audio('data:audio/wav;base64,' + wavBase64);
     audio.volume = Math.max(0, Math.min(1, soundVolume));
     currentAudio = audio;
-
     var playPromise = audio.play();
     if (playPromise && playPromise.catch) {
       playPromise.catch(function (error) {
@@ -694,7 +806,7 @@ function playGeminiWavBase64(wavBase64) {
       });
     }
   } catch (error) {
-    console.log('playGeminiWavBase64 error:', error);
+    console.log('playGeminiViaHtmlAudio_ error:', error);
   }
 }
 
@@ -959,36 +1071,14 @@ window.addEventListener('message', function (event) {
       event.data.message || event.data
     );
     expectGeminiAudio = false;
-
-    var fallbackText = '';
-    if (lastResultKey.indexOf('CHECKED_IN|') === 0) {
-      playBeep('success');
-      var partsOk = lastResultKey.split('|');
-      fallbackText = 'Check-in berhasil. ' + (partsOk[2] || '') + '.';
-    } else if (lastResultKey.indexOf('ALREADY_CHECKED_IN|') === 0) {
-      playBeep('warn');
-      var partsDup = lastResultKey.split('|');
-      fallbackText = 'Sudah dipakai check-in oleh ' + (partsDup[2] || '') + '.';
-    }
-
-    // Cadangan suara browser jika Gemini 429/error.
-    if (fallbackText && window.speechSynthesis) {
-      try {
-        unlockAudio();
-        window.speechSynthesis.cancel();
-        var utter = new SpeechSynthesisUtterance(fallbackText);
-        utter.lang = 'id-ID';
-        utter.rate = 1;
-        utter.volume = Math.max(0, Math.min(1, soundVolume));
-        window.speechSynthesis.speak(utter);
-      } catch (e) {}
-    }
-
+    // Feedback lokal sudah diputar saat CHECKIN_RESULT.
     var statusEl = document.getElementById('status');
-    if (statusEl && statusEl.innerText) {
-      statusEl.innerText =
-        statusEl.innerText.replace(/ · .*$/, '') +
-        ' · suara cadangan (Gemini limit)';
+    if (statusEl && /BERHASIL|SUDAH DIGUNAKAN/.test(statusEl.innerText || '')) {
+      if (statusEl.innerText.indexOf('Gemini') === -1) {
+        statusEl.innerText =
+          statusEl.innerText.replace(/ · .*$/, '') +
+          ' · suara lokal (Gemini limit)';
+      }
     }
   }
 });
@@ -1079,7 +1169,11 @@ function handleCheckInResult(result) {
       String(result.registrationId || '') +
       '|' +
       String(successName);
-    // Audio Gemini async via CHECKIN_AUDIO — UI tidak menunggu.
+    // Suara lokal segera; Gemini TTS menyusul jika berhasil.
+    playImmediateResultFeedback(
+      'success',
+      buildSuccessSpeechText(successName)
+    );
     return;
   }
 
@@ -1113,6 +1207,10 @@ function handleCheckInResult(result) {
       String(result.registrationId || '') +
       '|' +
       String(dupName);
+    playImmediateResultFeedback(
+      'warn',
+      buildDuplicateSpeechText(dupName)
+    );
     return;
   }
 
