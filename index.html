@@ -255,6 +255,9 @@ const RESPONSE_TIMEOUT_MS = 12000;
 // Hanya beep — tanpa TTS. Panel singkat lalu siap scan lagi.
 const AUTO_NEXT_MS = 1200;
 const SAME_TOKEN_COOLDOWN_MS = 1200;
+// Efek audio dari asset workspace.
+const AUDIO_SUCCESS_SRC = 'audio/success.mp3';
+const AUDIO_NOTIFY_SRC = 'audio/notification.mp3';
 
 let scanner = null;
 let cameraRunning = false;
@@ -477,16 +480,16 @@ function wavBufferToDataUri(buffer) {
 
 function prepareHtmlAudio() {
   if (!beepAudioSuccess) {
-    beepAudioSuccess = new Audio(buildBeepWavDataUri(1100, 180));
+    beepAudioSuccess = new Audio(AUDIO_SUCCESS_SRC);
     beepAudioSuccess.preload = 'auto';
   }
   if (!beepAudioWarn) {
-    beepAudioWarn = new Audio(buildFailedWavDataUri());
+    beepAudioWarn = new Audio(AUDIO_NOTIFY_SRC);
     beepAudioWarn.preload = 'auto';
   }
 
   beepAudioSuccess.volume = soundVolume;
-  beepAudioWarn.volume = Math.min(1, soundVolume);
+  beepAudioWarn.volume = Math.max(0, Math.min(1, soundVolume));
 }
 
 function unlockAudio() {
@@ -659,30 +662,40 @@ function playBeep(kind) {
       audioCtx.resume();
     }
 
-    // WebAudio dulu — paling andal setelah unlock di HP (async postMessage).
-    playBeepWebAudio(kind === 'warn' || kind === 'failed' ? 'failed' : 'success');
+    // Utamakan efek MP3 dari asset; WebAudio hanya cadangan jika play gagal.
+    const audio =
+      kind === 'warn' || kind === 'failed'
+        ? beepAudioWarn
+        : beepAudioSuccess;
 
-    const audio = (kind === 'warn' || kind === 'failed')
-      ? beepAudioWarn
-      : beepAudioSuccess;
-
-    if (!audio) return;
+    if (!audio) {
+      playBeepWebAudio(
+        kind === 'warn' || kind === 'failed' ? 'failed' : 'success'
+      );
+      return;
+    }
 
     audio.pause();
-    audio.currentTime = 0;
+    try {
+      audio.currentTime = 0;
+    } catch (eSeek) {}
     audio.muted = false;
     audio.volume = Math.max(0, Math.min(1, soundVolume));
 
     const playPromise = audio.play();
     if (playPromise && playPromise.catch) {
       playPromise.catch(function () {
-        playBeepWebAudio(kind);
+        playBeepWebAudio(
+          kind === 'warn' || kind === 'failed' ? 'failed' : 'success'
+        );
       });
     }
   } catch (error) {
     console.log('Beep error:', error);
     try {
-      playBeepWebAudio(kind);
+      playBeepWebAudio(
+        kind === 'warn' || kind === 'failed' ? 'failed' : 'success'
+      );
     } catch (e2) {
       console.log('WebAudio fallback error:', e2);
     }
