@@ -252,10 +252,11 @@ const WEB_APP_URL =
   'https://script.google.com/macros/s/AKfycbwbLyCiePd1Vw3CgxBz0GdSDgaxTWI8Fsg7XUaKYJIOuqDK0qIEtgkINVVq0ZsFR_gCMg/exec';
 
 const RESPONSE_TIMEOUT_MS = 15000;
-// Hasil + TTS Gemini sering 3–13 dtk; panel harus tetap terbaca & jangan di-cancel re-scan.
-const AUTO_NEXT_MS = 12000;
-const SAME_TOKEN_COOLDOWN_MS = 12000;
-const GEMINI_FALLBACK_MS = 10000;
+// Panel cukup sebentar: beep + ucapan mulai ~1 dtk setelah hasil.
+const AUTO_NEXT_MS = 5000;
+const SAME_TOKEN_COOLDOWN_MS = 5000;
+// Tunggu Gemini max 1 dtk; jika belum siap → suara lokal (hindari jeda panjang).
+const GEMINI_FALLBACK_MS = 1000;
 
 let scanner = null;
 let cameraRunning = false;
@@ -597,7 +598,7 @@ function clearGeminiFallbackTimer() {
   }
 }
 
-/** Beep segera; tunggu Gemini TTS perempuan. Fallback lokal hanya jika Gemini gagal/lambat. */
+/** Beep segera; tunggu Gemini max ~1 dtk. Jika belum siap → suara lokal (tanpa jeda panjang). */
 function playImmediateResultFeedback(kind, speechText) {
   if (!soundEnabled || soundVolume <= 0) return;
 
@@ -615,13 +616,13 @@ function playImmediateResultFeedback(kind, speechText) {
   geminiFallbackTimer = setTimeout(function () {
     if (!expectGeminiAudio || geminiAudioPlayed) return;
     expectGeminiAudio = false;
-    speakLocalIndonesian(pendingSpeechText, false);
-    var statusEl = document.getElementById('status');
-    if (statusEl && statusEl.innerText.indexOf('Gemini') === -1) {
-      statusEl.innerText =
-        statusEl.innerText.replace(/ · .*$/, '') +
-        ' · suara cadangan (tunggu Gemini)';
+    // Tandai sudah diputar supaya Gemini terlambat tidak dobel-ucap.
+    if (lastResultKey) {
+      audioPlayedForRequest = lastResultKey;
+    } else {
+      audioPlayedForRequest = audioRequestId;
     }
+    speakLocalIndonesian(pendingSpeechText, false);
   }, GEMINI_FALLBACK_MS);
 }
 
@@ -1108,15 +1109,12 @@ window.addEventListener('message', function (event) {
     expectGeminiAudio = false;
     clearGeminiFallbackTimer();
     if (!geminiAudioPlayed && pendingSpeechText) {
-      speakLocalIndonesian(pendingSpeechText, false);
-    }
-    var statusEl = document.getElementById('status');
-    if (statusEl && /BERHASIL|SUDAH DIGUNAKAN/.test(statusEl.innerText || '')) {
-      if (statusEl.innerText.indexOf('Gemini') === -1) {
-        statusEl.innerText =
-          statusEl.innerText.replace(/ · .*$/, '') +
-          ' · suara cadangan (Gemini error)';
+      if (lastResultKey) {
+        audioPlayedForRequest = lastResultKey;
+      } else {
+        audioPlayedForRequest = audioRequestId;
       }
+      speakLocalIndonesian(pendingSpeechText, false);
     }
   }
 });
@@ -1211,7 +1209,6 @@ function handleCheckInResult(result) {
       String(result.registrationId || '') +
       '|' +
       String(successName);
-    // Suara lokal segera; Gemini TTS menyusul jika berhasil.
     playImmediateResultFeedback(
       'success',
       buildSuccessSpeechText(successName)
