@@ -1,508 +1,596 @@
 <!DOCTYPE html>
-<html>
+<html lang="id">
 <head>
-  <base target="_top">
-
-  <meta name="viewport"
-        content="width=device-width, initial-scale=1">
-
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PoC QR CHECK-IN</title>
+  <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
   <style>
-    * {
-      box-sizing: border-box;
-    }
+    * { box-sizing: border-box; }
 
     body {
       margin: 0;
       padding: 20px;
-      font-family: Arial, sans-serif;
+      font-family: Arial, Helvetica, sans-serif;
       background: #f4f6f8;
       color: #1f2937;
     }
 
-    .container {
-      max-width: 520px;
-      margin: 0 auto;
-    }
+    .container { max-width: 520px; margin: 0 auto; }
 
     .card {
-      background: white;
-      border-radius: 16px;
-      padding: 24px;
-      box-shadow: 0 5px 20px rgba(0,0,0,0.08);
+      background: #ffffff;
+      border-radius: 18px;
+      padding: 22px;
+      box-shadow: 0 5px 20px rgba(0, 0, 0, 0.08);
     }
 
-    h1 {
-      margin: 0 0 6px;
-      text-align: center;
-      font-size: 24px;
-    }
+    h1 { margin: 0 0 6px; font-size: 25px; }
 
     .subtitle {
-      text-align: center;
       color: #6b7280;
-      margin-bottom: 24px;
+      margin-bottom: 22px;
     }
 
-    label {
-      display: block;
+    .scanner-title {
+      font-size: 17px;
       font-weight: bold;
-      margin-bottom: 8px;
-    }
-
-    input {
-      width: 100%;
-      padding: 14px;
-      border: 1px solid #d1d5db;
-      border-radius: 10px;
-      font-size: 16px;
       margin-bottom: 12px;
     }
 
-    button {
+    #reader {
       width: 100%;
+      overflow: hidden;
+      border-radius: 14px;
+      background: #111827;
+      min-height: 260px;
+    }
+
+    .instruction {
+      margin-top: 16px;
       padding: 14px;
+      background: #f9fafb;
+      border-radius: 10px;
+      text-align: center;
+      color: #4b5563;
+      font-size: 14px;
+    }
+
+    .sound-row {
+      margin-top: 14px;
+    }
+
+    .sound-button,
+    .reset-button,
+    .action-button {
+      width: 100%;
+      padding: 13px;
       border: 0;
       border-radius: 10px;
-      background: #111827;
-      color: white;
-      font-size: 16px;
+      font-size: 15px;
       font-weight: bold;
       cursor: pointer;
     }
 
-    button:disabled {
-      opacity: 0.6;
+    .sound-button {
+      background: #e5e7eb;
+      color: #111827;
     }
 
-    .result {
-      margin-top: 20px;
-      padding: 18px;
-      border-radius: 12px;
+    .sound-button.active {
+      background: #111827;
+      color: #ffffff;
+    }
+
+    .action-button {
+      margin-top: 12px;
+      background: #374151;
+      color: #ffffff;
       display: none;
     }
 
+    .result {
+      display: none;
+      margin-top: 18px;
+      padding: 18px;
+      border-radius: 12px;
+    }
+
     .success {
-      background: #dcfce7;
-      border: 1px solid #86efac;
-      color: #166534;
+      background: #ecfdf5;
+      border: 1px solid #10b981;
+      color: #065f46;
     }
 
     .warning {
-      background: #fef3c7;
-      border: 1px solid #fcd34d;
+      background: #fffbeb;
+      border: 1px solid #f59e0b;
       color: #92400e;
     }
 
     .error {
-      background: #fee2e2;
-      border: 1px solid #fca5a5;
+      background: #fef2f2;
+      border: 1px solid #ef4444;
       color: #991b1b;
     }
 
     .result-title {
-      font-size: 22px;
+      font-size: 21px;
       font-weight: bold;
-      margin-bottom: 14px;
+      margin-bottom: 12px;
     }
 
-    .data-row {
-      margin: 7px 0;
-    }
+    .detail { margin: 7px 0; }
 
-    .data-label {
-      font-weight: bold;
-    }
-
-    .bridge-status {
-      margin-top: 12px;
-      font-size: 12px;
-      color: #6b7280;
+    .status {
+      margin-top: 18px;
       text-align: center;
+      color: #6b7280;
+      font-size: 13px;
+    }
+
+    .reset-button {
+      margin-top: 15px;
+      background: #111827;
+      color: #ffffff;
+      display: none;
     }
   </style>
 </head>
-
 <body>
-
 <div class="container">
-
   <div class="card">
-
     <h1>PoC QR CHECK-IN</h1>
+    <div class="subtitle">Scanner Petugas</div>
 
-    <div class="subtitle">
-      Panel Petugas
+    <div class="scanner-title">Scan QR Code Peserta</div>
+    <div id="reader"></div>
+
+    <div class="instruction">
+      Arahkan QR ke kamera
     </div>
 
-    <!--
-      INPUT MANUAL
-      Tetap dipertahankan sebagai backup.
-    -->
+    <div class="sound-row">
+      <button
+        id="soundButton"
+        class="sound-button"
+        type="button"
+        onclick="toggleSound()"
+      >
+        AKTIFKAN SUARA
+      </button>
+    </div>
 
-    <label for="token">
-      QR Token
-    </label>
-
-    <input
-      id="token"
-      type="text"
-      placeholder="Masukkan QR Token"
-      autocomplete="off"
+    <button
+      id="startButton"
+      class="action-button"
+      type="button"
+      onclick="startScanner()"
     >
-
-    <button id="checkButton" onclick="manualCheckIn()">
-      CHECK-IN
+      AKTIFKAN KAMERA
     </button>
 
-    <div
-      id="result"
-      class="result">
+    <div id="result" class="result">
+      <div id="resultTitle" class="result-title"></div>
+      <div id="resultContent"></div>
     </div>
 
-    <div
-      id="bridgeStatus"
-      class="bridge-status">
-      Menunggu scanner...
-    </div>
+    <button
+      id="resetButton"
+      class="reset-button"
+      type="button"
+      onclick="resetScanner()"
+    >
+      SCAN PESERTA BERIKUTNYA
+    </button>
 
+    <div id="status" class="status">
+      Status: SIAP SCAN
+    </div>
   </div>
-
 </div>
 
+<!--
+  Hidden Apps Script bridge.
+  Token dikirim via ?token= karena nested googleusercontent iframe
+  tidak menerima postMessage dari GitHub Pages dengan andal.
+-->
+<iframe
+  id="appsScriptFrame"
+  title="Apps Script bridge"
+  src="https://script.google.com/macros/s/AKfycbwbLyCiePd1Vw3CgxBz0GdSDgaxTWI8Fsg7XUaKYJIOuqDK0qIEtgkINVVq0ZsFR_gCMg/exec"
+  style="position:absolute;width:1px;height:1px;border:0;opacity:0;pointer-events:none;"
+></iframe>
 
 <script>
+const WEB_APP_URL =
+  'https://script.google.com/macros/s/AKfycbwbLyCiePd1Vw3CgxBz0GdSDgaxTWI8Fsg7XUaKYJIOuqDK0qIEtgkINVVq0ZsFR_gCMg/exec';
 
-/* =========================================================
-   BRIDGE DARI GITHUB PAGES SCANNER
-   ========================================================= */
+const RESPONSE_TIMEOUT_MS = 20000;
 
-window.addEventListener('message', function(event) {
+let scanner = null;
+let isProcessing = false;
+let soundEnabled = false;
+let audioCtx = null;
+let responseTimer = null;
+let lastToken = '';
+let lastTokenAt = 0;
 
-  /*
-   * Hanya menerima pesan dari GitHub Pages kita.
-   */
-  if (
-    event.origin !==
-    'https://register-qrcode.github.io'
-  ) {
-    return;
-  }
-
-  /*
-   * Pastikan pesan berasal dari parent window.
-   */
-  if (event.source !== window.parent) {
-    return;
-  }
-
-  var data = event.data || {};
-
-  if (data.type !== 'QR_SCANNED') {
-    return;
-  }
-
-  var token = String(data.token || '').trim();
-
-  if (!token) {
-    sendResultToScanner({
-      status: 'INVALID',
-      message: 'QR Token kosong.'
-    });
-    return;
-  }
-
-  document.getElementById('bridgeStatus').innerText =
-    'QR diterima. Memeriksa data...';
-
-  /*
-   * Kirim token ke Apps Script server.
-   */
-  google.script.run
-
-    .withSuccessHandler(function(result) {
-
-      document.getElementById('bridgeStatus').innerText =
-        'Pemeriksaan selesai.';
-
-      sendResultToScanner(result);
-
-    })
-
-    .withFailureHandler(function(error) {
-
-      var message =
-        error && error.message
-          ? error.message
-          : 'Terjadi kesalahan pada server.';
-
-      sendResultToScanner({
-        status: 'ERROR',
-        message: message
-      });
-
-    })
-
-    .processCameraData(token);
-
-});
-
-
-/* =========================================================
-   KIRIM HASIL KEMBALI KE GITHUB PAGES
-   ========================================================= */
-
-function sendResultToScanner(result) {
-
-  window.parent.postMessage(
-    {
-      type: 'CHECKIN_RESULT',
-      result: result
-    },
-    'https://register-qrcode.github.io'
-  );
-
+function setStatus(message) {
+  document.getElementById('status').innerText = message;
 }
-
-
-/* =========================================================
-   MANUAL CHECK-IN
-   ========================================================= */
-
-function manualCheckIn() {
-
-  var token =
-    document.getElementById('token').value.trim();
-
-  if (!token) {
-
-    showResult({
-      status: 'INVALID',
-      message: 'Silakan masukkan QR Token.'
-    });
-
-    return;
-  }
-
-  var button =
-    document.getElementById('checkButton');
-
-  button.disabled = true;
-  button.innerText = 'MEMERIKSA...';
-
-  google.script.run
-
-    .withSuccessHandler(function(result) {
-
-      button.disabled = false;
-      button.innerText = 'CHECK-IN';
-
-      showResult(result);
-
-    })
-
-    .withFailureHandler(function(error) {
-
-      button.disabled = false;
-      button.innerText = 'CHECK-IN';
-
-      showResult({
-        status: 'ERROR',
-        message:
-          error && error.message
-            ? error.message
-            : 'Terjadi kesalahan.'
-      });
-
-    })
-
-    .processCameraData(token);
-
-}
-
-
-/* =========================================================
-   TAMPILKAN HASIL
-   ========================================================= */
-
-function showResult(result) {
-
-  var box =
-    document.getElementById('result');
-
-  if (!result) {
-
-    box.className =
-      'result error';
-
-    box.innerHTML =
-      '<div class="result-title">ERROR</div>' +
-      '<div>Hasil pemeriksaan kosong.</div>';
-
-    box.style.display = 'block';
-
-    return;
-  }
-
-
-  /* ==========================================
-     CHECK-IN BERHASIL
-     ========================================== */
-
-  if (
-    result.status === 'CHECKED_IN' ||
-    result.status === 'SUCCESS'
-  ) {
-
-    box.className =
-      'result success';
-
-    box.innerHTML =
-
-      '<div class="result-title">' +
-      'CHECK-IN BERHASIL' +
-      '</div>' +
-
-      '<div class="data-row">' +
-      '<span class="data-label">Nama:</span> ' +
-      escapeHtml(result.name || '-') +
-      '</div>' +
-
-      '<div class="data-row">' +
-      '<span class="data-label">Instansi:</span> ' +
-      escapeHtml(result.institution || '-') +
-      '</div>' +
-
-      '<div class="data-row">' +
-      '<span class="data-label">Registration ID:</span> ' +
-      escapeHtml(result.registrationId || '-') +
-      '</div>' +
-
-      '<div class="data-row">' +
-      '<span class="data-label">Check-in:</span> ' +
-      escapeHtml(result.checkInTime || '-') +
-      '</div>';
-
-    box.style.display = 'block';
-
-    return;
-  }
-
-
-  /* ==========================================
-     SUDAH CHECK-IN SEBELUMNYA
-     ========================================== */
-
-  if (
-    result.status === 'ALREADY_CHECKED_IN'
-  ) {
-
-    box.className =
-      'result warning';
-
-    box.innerHTML =
-
-      '<div class="result-title">' +
-      'SUDAH CHECK-IN' +
-      '</div>' +
-
-      '<div class="data-row">' +
-      '<span class="data-label">Nama:</span> ' +
-      escapeHtml(result.name || '-') +
-      '</div>' +
-
-      '<div class="data-row">' +
-      '<span class="data-label">Instansi:</span> ' +
-      escapeHtml(result.institution || '-') +
-      '</div>' +
-
-      '<div class="data-row">' +
-      '<span class="data-label">Registration ID:</span> ' +
-      escapeHtml(result.registrationId || '-') +
-      '</div>' +
-
-      '<div class="data-row">' +
-      '<span class="data-label">Check-in sebelumnya:</span> ' +
-      escapeHtml(result.checkInTime || '-') +
-      '</div>';
-
-    box.style.display = 'block';
-
-    return;
-  }
-
-
-  /* ==========================================
-     QR TIDAK VALID
-     ========================================== */
-
-  if (
-    result.status === 'INVALID' ||
-    result.status === 'INVALID_STATUS'
-  ) {
-
-    box.className =
-      'result error';
-
-    box.innerHTML =
-
-      '<div class="result-title">' +
-      'QR TIDAK VALID' +
-      '</div>' +
-
-      '<div>' +
-      escapeHtml(
-        result.message ||
-        'QR Code tidak dapat diverifikasi.'
-      ) +
-      '</div>';
-
-    box.style.display = 'block';
-
-    return;
-  }
-
-
-  /* ==========================================
-     ERROR
-     ========================================== */
-
-  box.className =
-    'result error';
-
-  box.innerHTML =
-
-    '<div class="result-title">' +
-    'ERROR' +
-    '</div>' +
-
-    '<div>' +
-    escapeHtml(
-      result.message ||
-      'Terjadi kesalahan.'
-    ) +
-    '</div>';
-
-  box.style.display = 'block';
-
-}
-
-
-/* =========================================================
-   SECURITY
-   ========================================================= */
 
 function escapeHtml(value) {
-
-  return String(value)
+  return String(value || '')
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#039;');
-
 }
 
-</script>
+function isAllowedResultOrigin(origin) {
+  if (!origin) return false;
+  if (origin === 'https://script.google.com') return true;
+  if (origin.indexOf('https://') !== 0) return false;
+  return (
+    origin.indexOf('.googleusercontent.com') !== -1 ||
+    origin.indexOf('script.google.com') !== -1
+  );
+}
 
+function toggleSound() {
+  soundEnabled = !soundEnabled;
+  const button = document.getElementById('soundButton');
+
+  if (soundEnabled) {
+    button.classList.add('active');
+    button.innerText = 'SUARA AKTIF';
+    unlockAudio();
+    playBeep();
+  } else {
+    button.classList.remove('active');
+    button.innerText = 'AKTIFKAN SUARA';
+  }
+}
+
+function unlockAudio() {
+  try {
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if (!Ctx) return;
+    if (!audioCtx) audioCtx = new Ctx();
+    if (audioCtx.state === 'suspended') {
+      audioCtx.resume();
+    }
+  } catch (error) {
+    console.log('Audio unlock:', error);
+  }
+}
+
+function playBeep() {
+  if (!soundEnabled) return;
+
+  try {
+    unlockAudio();
+    if (!audioCtx) return;
+
+    const oscillator = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+
+    oscillator.type = 'sine';
+    oscillator.frequency.value = 880;
+    gain.gain.value = 0.05;
+
+    oscillator.connect(gain);
+    gain.connect(audioCtx.destination);
+
+    oscillator.start();
+    setTimeout(function () {
+      oscillator.stop();
+    }, 180);
+  } catch (error) {
+    console.log('Beep error:', error);
+  }
+}
+
+function vibrateSuccess() {
+  if (navigator.vibrate) {
+    navigator.vibrate([80, 40, 80]);
+  }
+}
+
+function clearResponseTimer() {
+  if (responseTimer) {
+    clearTimeout(responseTimer);
+    responseTimer = null;
+  }
+}
+
+function showStartButton(show) {
+  document.getElementById('startButton').style.display =
+    show ? 'block' : 'none';
+}
+
+function showResult(type, title, content) {
+  const result = document.getElementById('result');
+  document.getElementById('resultTitle').innerHTML = title;
+  document.getElementById('resultContent').innerHTML = content;
+  result.className = 'result ' + type;
+  result.style.display = 'block';
+  document.getElementById('resetButton').style.display = 'block';
+}
+
+function cameraErrorMessage(error) {
+  const text = String(
+    (error && (error.name || error.message)) || error || ''
+  ).toLowerCase();
+
+  if (
+    text.indexOf('notallowed') !== -1 ||
+    text.indexOf('permission') !== -1 ||
+    text.indexOf('denied') !== -1
+  ) {
+    return 'Izin kamera ditolak. Izinkan kamera di pengaturan browser, lalu ketuk AKTIFKAN KAMERA.';
+  }
+
+  if (
+    text.indexOf('notfound') !== -1 ||
+    text.indexOf('devices not found') !== -1 ||
+    text.indexOf('requested device not found') !== -1
+  ) {
+    return 'Kamera tidak tersedia pada perangkat ini.';
+  }
+
+  if (
+    text.indexOf('notreadable') !== -1 ||
+    text.indexOf('trackstart') !== -1 ||
+    text.indexOf('in use') !== -1
+  ) {
+    return 'Kamera sedang dipakai aplikasi lain. Tutup aplikasi tersebut lalu coba lagi.';
+  }
+
+  if (window.isSecureContext === false) {
+    return 'Kamera membutuhkan HTTPS.';
+  }
+
+  return 'Kamera tidak dapat digunakan. Ketuk AKTIFKAN KAMERA untuk mencoba lagi.';
+}
+
+function startScanner() {
+  if (isProcessing) return;
+
+  showStartButton(false);
+  document.getElementById('result').style.display = 'none';
+  document.getElementById('resetButton').style.display = 'none';
+
+  if (scanner) {
+    scanner.stop().then(function () {
+      scanner.clear();
+      scanner = null;
+      beginCamera();
+    }).catch(function () {
+      scanner = null;
+      beginCamera();
+    });
+    return;
+  }
+
+  beginCamera();
+}
+
+function beginCamera() {
+  if (typeof Html5Qrcode === 'undefined') {
+    setStatus('Status: Library scanner gagal dimuat.');
+    showStartButton(true);
+    return;
+  }
+
+  scanner = new Html5Qrcode('reader');
+
+  const config = {
+    fps: 10,
+    qrbox: { width: 250, height: 250 },
+    aspectRatio: 1.0
+  };
+
+  setStatus('Status: Meminta izin kamera...');
+
+  scanner
+    .start(
+      { facingMode: 'environment' },
+      config,
+      onScanSuccess,
+      onScanError
+    )
+    .then(function () {
+      setStatus('Status: SIAP SCAN');
+    })
+    .catch(function (error) {
+      console.error(error);
+      setStatus('Status: ' + cameraErrorMessage(error));
+      showStartButton(true);
+      scanner = null;
+    });
+}
+
+function stopScannerSoft() {
+  if (!scanner) {
+    return Promise.resolve();
+  }
+
+  return scanner.stop().catch(function (error) {
+    console.log('Scanner stop:', error);
+  });
+}
+
+function onScanSuccess(decodedText) {
+  if (isProcessing) return;
+
+  const token = String(decodedText || '').trim();
+  if (!token) return;
+
+  const now = Date.now();
+  if (token === lastToken && now - lastTokenAt < 2500) {
+    return;
+  }
+
+  lastToken = token;
+  lastTokenAt = now;
+  isProcessing = true;
+
+  setStatus('Status: QR terbaca. Memeriksa data peserta...');
+
+  stopScannerSoft().then(function () {
+    sendTokenToAppsScript(token);
+  });
+}
+
+function onScanError() {
+  // Ignore continuous scan miss events.
+}
+
+function sendTokenToAppsScript(token) {
+  if (!navigator.onLine) {
+    handleCheckInResult({
+      status: 'ERROR',
+      message: 'Tidak ada koneksi internet. Silakan coba lagi.'
+    });
+    return;
+  }
+
+  const frame = document.getElementById('appsScriptFrame');
+  if (!frame) {
+    handleCheckInResult({
+      status: 'ERROR',
+      message: 'Koneksi ke sistem check-in tidak tersedia.'
+    });
+    return;
+  }
+
+  clearResponseTimer();
+  responseTimer = setTimeout(function () {
+    handleCheckInResult({
+      status: 'ERROR',
+      message: 'Gagal terhubung ke server. Silakan coba lagi.'
+    });
+  }, RESPONSE_TIMEOUT_MS);
+
+  // Reload iframe with token. Requires doGet() token handler on Apps Script.
+  frame.src =
+    WEB_APP_URL +
+    '?token=' +
+    encodeURIComponent(token) +
+    '&_=' +
+    Date.now();
+}
+
+window.addEventListener('message', function (event) {
+  if (!event.data || event.data.type !== 'CHECKIN_RESULT') {
+    return;
+  }
+
+  if (!isAllowedResultOrigin(event.origin)) {
+    return;
+  }
+
+  handleCheckInResult(event.data.result);
+});
+
+function handleCheckInResult(result) {
+  if (!isProcessing && !result) return;
+
+  clearResponseTimer();
+  isProcessing = true;
+
+  if (!result) {
+    showResult(
+      'error',
+      '⚠ GAGAL TERHUBUNG KE SERVER',
+      'Tidak ada respons dari server.'
+    );
+    setStatus('Status: Gagal terhubung ke server');
+    return;
+  }
+
+  if (result.status === 'CHECKED_IN' || result.status === 'SUCCESS') {
+    const content =
+      '<div class="detail"><strong>Nama:</strong><br>' +
+      escapeHtml(result.name || '-') +
+      '</div>' +
+      '<div class="detail"><strong>Instansi:</strong><br>' +
+      escapeHtml(result.institution || '-') +
+      '</div>' +
+      '<div class="detail"><strong>Registration ID:</strong><br>' +
+      escapeHtml(result.registrationId || '-') +
+      '</div>' +
+      '<div class="detail"><strong>Check-in:</strong><br>' +
+      escapeHtml(result.checkInTime || '-') +
+      '</div>';
+
+    showResult('success', '✓ CHECK-IN BERHASIL', content);
+    setStatus('Status: CHECK-IN BERHASIL');
+    playBeep();
+    vibrateSuccess();
+    return;
+  }
+
+  if (result.status === 'ALREADY_CHECKED_IN') {
+    const content =
+      '<div class="detail"><strong>Nama:</strong><br>' +
+      escapeHtml(result.name || '-') +
+      '</div>' +
+      '<div class="detail"><strong>Instansi:</strong><br>' +
+      escapeHtml(result.institution || '-') +
+      '</div>' +
+      '<div class="detail"><strong>Registration ID:</strong><br>' +
+      escapeHtml(result.registrationId || '-') +
+      '</div>' +
+      '<div class="detail"><strong>Check-in sebelumnya:</strong><br>' +
+      escapeHtml(result.checkInTime || '-') +
+      '</div>';
+
+    showResult('warning', '⚠ SUDAH CHECK-IN', content);
+    setStatus('Status: SUDAH CHECK-IN');
+    return;
+  }
+
+  if (result.status === 'INVALID' || result.status === 'INVALID_STATUS') {
+    showResult(
+      'error',
+      '✕ QR TIDAK VALID',
+      escapeHtml(result.message || 'QR Token tidak ditemukan.')
+    );
+    setStatus('Status: QR TIDAK VALID');
+    return;
+  }
+
+  showResult(
+    'error',
+    '⚠ GAGAL TERHUBUNG KE SERVER',
+    escapeHtml(result.message || 'Silakan coba lagi.')
+  );
+  setStatus('Status: Gagal terhubung ke server');
+}
+
+function resetScanner() {
+  clearResponseTimer();
+  isProcessing = false;
+  document.getElementById('resetButton').style.display = 'none';
+  document.getElementById('result').style.display = 'none';
+  setStatus('Status: Menyiapkan kamera...');
+
+  const frame = document.getElementById('appsScriptFrame');
+  if (frame) {
+    frame.src = WEB_APP_URL;
+  }
+
+  startScanner();
+}
+
+window.addEventListener('load', function () {
+  // Auto-start; if browser blocks without gesture, tombol AKTIFKAN KAMERA muncul.
+  startScanner();
+});
+</script>
 </body>
 </html>
