@@ -176,7 +176,8 @@
     <div id="reader"></div>
 
     <div class="instruction">
-      Arahkan QR ke kamera
+      Arahkan QR ke kamera.<br>
+      Aktifkan suara agar Gemini TTS memandu check-in.
     </div>
 
     <div class="controls">
@@ -268,6 +269,8 @@ let lastToken = '';
 let lastTokenAt = 0;
 let beepAudioSuccess = null;
 let beepAudioWarn = null;
+let currentAudio = null;
+let audioRequestId = 0;
 
 document.getElementById('soundButton').addEventListener('click', toggleSound);
 document.getElementById('startButton').addEventListener('click', function () {
@@ -296,6 +299,7 @@ document.getElementById('volumeSlider').addEventListener('input', function (even
 
   if (beepAudioSuccess) beepAudioSuccess.volume = soundVolume;
   if (beepAudioWarn) beepAudioWarn.volume = Math.min(1, soundVolume);
+  if (currentAudio) currentAudio.volume = soundVolume;
 
   // Moving the slider counts as user gesture — unlock + enable sound.
   if (!soundEnabled) {
@@ -340,14 +344,8 @@ function toggleSound() {
     button.classList.add('active');
     button.innerText = 'SUARA AKTIF';
     unlockAudio();
-    if (window.speechSynthesis) {
-      window.speechSynthesis.cancel();
-    }
-    // Demo: sukses dulu, lalu failed — supaya bedanya jelas.
+    // Beep uji lokal (Gemini voice muncul saat scan check-in).
     playBeep('success');
-    setTimeout(function () {
-      playAlreadyOrFailSound();
-    }, 450);
   } else {
     button.classList.remove('active');
     button.innerText = 'AKTIFKAN SUARA';
@@ -631,16 +629,58 @@ function speakFailed() {
   }
 }
 
-function playCheckInSuccessSound() {
-  playBeep('success');
+function formatCheckInTime(value) {
+  var raw = String(value || '').trim();
+  if (!raw || raw === '-') return '-';
+
+  // Ambil HH:mm:ss jika ada di string tanggal.
+  var match = raw.match(/(\d{1,2}:\d{2}:\d{2})/);
+  if (match) return match[1];
+
+  return raw;
 }
 
-function playAlreadyOrFailSound() {
-  // Buzz failed dulu (selalu terdengar), lalu voice "Failed".
-  playBeep('failed');
-  setTimeout(function () {
-    speakFailed();
-  }, 280);
+function stopCurrentAudio() {
+  if (currentAudio) {
+    try {
+      currentAudio.pause();
+      currentAudio.removeAttribute('src');
+      currentAudio.load();
+    } catch (e) {}
+    currentAudio = null;
+  }
+}
+
+function playGeminiWavBase64(wavBase64) {
+  if (!wavBase64) return;
+
+  try {
+    unlockAudio();
+    stopCurrentAudio();
+
+    var audio = new Audio(
+      'data:audio/wav;base64,' + wavBase64
+    );
+    audio.volume = Math.max(0, Math.min(1, soundVolume));
+    currentAudio = audio;
+
+    var playPromise = audio.play();
+    if (playPromise && playPromise.catch) {
+      playPromise.catch(function (error) {
+        console.log('Gemini audio play error:', error);
+      });
+    }
+  } catch (error) {
+    console.log('playGeminiWavBase64 error:', error);
+  }
+}
+
+function buildSuccessSpeechText(name) {
+  return 'Check-in berhasil. ' + String(name || '').trim() + '.';
+}
+
+function buildDuplicateSpeechText(name) {
+  return 'Sudah dipakai check-in oleh ' + String(name || '').trim() + '.';
 }
 
 function vibrateSuccess() {
@@ -869,7 +909,7 @@ function sendTokenToAppsScript(token) {
 }
 
 window.addEventListener('message', function (event) {
-  if (!event.data || event.data.type !== 'CHECKIN_RESULT') {
+  if (!event.data || !event.data.type) {
     return;
   }
 
@@ -877,65 +917,97 @@ window.addEventListener('message', function (event) {
     return;
   }
 
-  handleCheckInResult(event.data.result);
+  if (event.data.type === 'CHECKIN_RESULT') {
+    handleCheckInResult(event.data.result);
+    return;
+  }
+
+  if (event.data.type === 'CHECKIN_AUDIO') {
+    handleCheckInAudio(event.data.audio);
+    return;
+  }
+
+  if (event.data.type === 'CHECKIN_AUDIO_ERROR') {
+    console.log(
+      'Gemini TTS error (check-in tetap valid):',
+      event.data.message || event.data
+    );
+  }
 });
+
+function handleCheckInAudio(audio) {
+  if (!audio || !audio.wavBase64) return;
+  if (!soundEnabled || soundVolume <= 0) return;
+
+  // Satu hasil scan = satu audio (abaikan late response lama).
+  playGeminiWavBase64(audio.wavBase64);
+}
 
 function handleCheckInResult(result) {
   clearResponseTimer();
   isProcessing = true;
+  audioRequestId += 1;
+  stopCurrentAudio();
 
   if (!result) {
     showResult(
       'error',
-      '⚠ GAGAL TERHUBUNG KE SERVER',
+      '⚠ CHECK-IN TIDAK BERHASIL',
       'Tidak ada respons dari server.'
     );
     setStatus('Status: Gagal · siap scan berikutnya');
-    playAlreadyOrFailSound();
+    playBeep('failed');
     return;
   }
 
   if (result.status === 'CHECKED_IN' || result.status === 'SUCCESS') {
-    const content =
-      '<div class="detail"><strong>Nama:</strong><br>' +
-      escapeHtml(result.name || '-') +
+    var successName = result.name || '-';
+    var successInstansi = result.institution || '-';
+    var successTime = formatCheckInTime(result.checkInTime);
+
+    var successContent =
+      '<div class="detail" style="text-align:center;font-size:20px;font-weight:bold;margin:10px 0;">' +
+      escapeHtml(successName) +
       '</div>' +
-      '<div class="detail"><strong>Instansi:</strong><br>' +
-      escapeHtml(result.institution || '-') +
+      '<div class="detail" style="text-align:center;">' +
+      escapeHtml(successInstansi) +
       '</div>' +
-      '<div class="detail"><strong>Registration ID:</strong><br>' +
-      escapeHtml(result.registrationId || '-') +
-      '</div>' +
-      '<div class="detail"><strong>Check-in:</strong><br>' +
-      escapeHtml(result.checkInTime || '-') +
+      '<div class="detail" style="text-align:center;margin-top:12px;">' +
+      escapeHtml(successTime) +
       '</div>';
 
-    showResult('success', '✓ CHECK-IN BERHASIL', content);
+    showResult('success', '✓ CHECK-IN BERHASIL', successContent);
     setStatus('Status: BERHASIL · siap scan berikutnya');
-    playCheckInSuccessSound();
     vibrateSuccess();
+    // Audio Gemini dikirim async via CHECKIN_AUDIO (jangan block UI).
     return;
   }
 
   if (result.status === 'ALREADY_CHECKED_IN') {
-    const content =
-      '<div class="detail"><strong>Nama:</strong><br>' +
-      escapeHtml(result.name || '-') +
+    var dupName = result.name || '-';
+    var dupInstansi = result.institution || '-';
+    var dupTime = formatCheckInTime(result.checkInTime);
+
+    var dupContent =
+      '<div class="detail" style="text-align:center;margin-bottom:10px;">' +
+      'QR Code sudah pernah digunakan.' +
       '</div>' +
-      '<div class="detail"><strong>Instansi:</strong><br>' +
-      escapeHtml(result.institution || '-') +
+      '<div class="detail" style="text-align:center;"><strong>Sudah check-in oleh:</strong></div>' +
+      '<div class="detail" style="text-align:center;font-size:18px;font-weight:bold;margin:8px 0;">' +
+      escapeHtml(dupName) +
       '</div>' +
-      '<div class="detail"><strong>Registration ID:</strong><br>' +
-      escapeHtml(result.registrationId || '-') +
+      '<div class="detail" style="text-align:center;">' +
+      escapeHtml(dupInstansi) +
       '</div>' +
-      '<div class="detail"><strong>Check-in sebelumnya:</strong><br>' +
-      escapeHtml(result.checkInTime || '-') +
+      '<div class="detail" style="text-align:center;margin-top:12px;">' +
+      '<strong>Waktu check-in:</strong><br>' +
+      escapeHtml(dupTime) +
       '</div>';
 
-    showResult('warning', '⚠ SUDAH CHECK-IN', content);
-    setStatus('Status: SUDAH CHECK-IN · siap scan berikutnya');
-    playAlreadyOrFailSound();
+    showResult('warning', '! CHECK-IN TIDAK BERHASIL', dupContent);
+    setStatus('Status: SUDAH DIGUNAKAN · siap scan berikutnya');
     vibrateWarn();
+    // Audio Gemini async: "Sudah dipakai check-in oleh [NAMA]."
     return;
   }
 
@@ -946,17 +1018,17 @@ function handleCheckInResult(result) {
       escapeHtml(result.message || 'QR Token tidak ditemukan.')
     );
     setStatus('Status: TIDAK VALID · siap scan berikutnya');
-    playAlreadyOrFailSound();
+    playBeep('failed');
     return;
   }
 
   showResult(
     'error',
-    '⚠ GAGAL TERHUBUNG KE SERVER',
+    '⚠ CHECK-IN TIDAK BERHASIL',
     escapeHtml(result.message || 'Silakan coba lagi.')
   );
   setStatus('Status: Gagal · siap scan berikutnya');
-  playAlreadyOrFailSound();
+  playBeep('failed');
 }
 
 function resetScanner() {
