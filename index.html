@@ -252,8 +252,9 @@ const WEB_APP_URL =
   'https://script.google.com/macros/s/AKfycbwbLyCiePd1Vw3CgxBz0GdSDgaxTWI8Fsg7XUaKYJIOuqDK0qIEtgkINVVq0ZsFR_gCMg/exec';
 
 const RESPONSE_TIMEOUT_MS = 15000;
-const AUTO_NEXT_MS = 900;
-const SAME_TOKEN_COOLDOWN_MS = 2500;
+// Hasil + TTS Gemini sering 3–13 dtk; panel harus tetap terbaca & jangan di-cancel re-scan.
+const AUTO_NEXT_MS = 8000;
+const SAME_TOKEN_COOLDOWN_MS = 12000;
 
 let scanner = null;
 let cameraRunning = false;
@@ -633,10 +634,8 @@ function speakFailed() {
 }
 
 function beginNewScanCycle() {
-  // Batalkan audio lama agar tidak nabrak scan berikutnya.
-  stopCurrentAudio();
-  expectGeminiAudio = false;
-  lastResultKey = '';
+  // Jangan clear expectGeminiAudio / lastResultKey di sini —
+  // re-scan QR yang sama sering datang sebelum TTS selesai (3–13 dtk).
   audioRequestId += 1;
 }
 
@@ -747,12 +746,13 @@ function showResult(type, title, content) {
   document.getElementById('resetButton').style.display = 'block';
   document.getElementById('manualNextButton').style.display = 'block';
 
-  // Buka kunci scan berikutnya SEGERA (QR berbeda bisa langsung).
-  isProcessing = false;
+  // Kunci scan selama panel hasil tampil supaya re-scan tidak menghapus teks/TTS.
+  isProcessing = true;
 
   clearAutoNextTimer();
   autoNextTimer = setTimeout(function () {
     hideResultPanel();
+    isProcessing = false;
     setStatus('Status: SIAP SCAN');
   }, AUTO_NEXT_MS);
 }
@@ -964,18 +964,27 @@ window.addEventListener('message', function (event) {
 function handleCheckInAudio(audio) {
   if (!audio || !audio.wavBase64) return;
 
-  // Abaikan audio terlambat dari scan sebelumnya.
+  var key = audio.resultKey ? String(audio.resultKey) : '';
+
+  // Utamakan resultKey: TTS boleh datang terlambat setelah panel hasil.
+  if (key && lastResultKey && key === lastResultKey) {
+    if (audioPlayedForRequest === key) {
+      console.log('Ignore duplicate Gemini audio for same resultKey.');
+      return;
+    }
+    audioPlayedForRequest = key;
+    expectGeminiAudio = false;
+    unlockAudio();
+    playGeminiWavBase64(audio.wavBase64);
+    return;
+  }
+
   if (!expectGeminiAudio) {
     console.log('Ignore stale Gemini audio (no pending result).');
     return;
   }
 
-  if (audio.requestId && Number(audio.requestId) !== audioRequestId) {
-    console.log('Ignore stale Gemini audio (requestId mismatch).');
-    return;
-  }
-
-  if (audio.resultKey && lastResultKey && audio.resultKey !== lastResultKey) {
+  if (key && lastResultKey && key !== lastResultKey) {
     console.log('Ignore stale Gemini audio (resultKey mismatch).');
     return;
   }
@@ -988,7 +997,6 @@ function handleCheckInAudio(audio) {
   audioPlayedForRequest = audioRequestId;
   expectGeminiAudio = false;
 
-  // Coba putar meskipun toggle belum ON jika user sudah gesture (kamera/tombol).
   unlockAudio();
   playGeminiWavBase64(audio.wavBase64);
 }
