@@ -398,34 +398,7 @@ function doGet(e) {
       'google.script.run' +
       '.withSuccessHandler(function(result){' +
       '  postTop({type:"CHECKIN_RESULT",result:result});' +
-      '  var name=(result&&result.name)?String(result.name).trim():"";' +
-      '  var regId=(result&&result.registrationId)?String(result.registrationId).trim():"";' +
-      '  var speak="";' +
-      '  var kind="";' +
-      '  var resultKey="";' +
-      '  if(result&&(result.status==="CHECKED_IN"||result.status==="SUCCESS")&&name){' +
-      '    speak="Check-in berhasil. "+name+".";' +
-      '    kind="CHECKED_IN";' +
-      '    resultKey="CHECKED_IN|"+regId+"|"+name;' +
-      '  } else if(result&&result.status==="ALREADY_CHECKED_IN"&&name){' +
-      '    speak="Sudah dipakai check-in oleh "+name+".";' +
-      '    kind="ALREADY_CHECKED_IN";' +
-      '    resultKey="ALREADY_CHECKED_IN|"+regId+"|"+name;' +
-      '  }' +
-      '  if(!speak){return;}' +
-      '  google.script.run' +
-      '    .withSuccessHandler(function(audio){' +
-      '      if(audio&&audio.ok&&audio.wavBase64){' +
-      '        audio.resultKey=resultKey;' +
-      '        postTop({type:"CHECKIN_AUDIO",audio:audio});' +
-      '      } else {' +
-      '        postTop({type:"CHECKIN_AUDIO_ERROR",message:(audio&&audio.error)||"TTS failed",resultKey:resultKey});' +
-      '      }' +
-      '    })' +
-      '    .withFailureHandler(function(err){' +
-      '      postTop({type:"CHECKIN_AUDIO_ERROR",message:(err&&err.message)||String(err),resultKey:resultKey});' +
-      '    })' +
-      '    .synthesizeCheckInSpeech(speak, kind);' +
+      '  // TTS dimatikan — UI hanya pakai beep.' +
       '})' +
       '.withFailureHandler(function(error){' +
       '  postTop({type:"CHECKIN_RESULT",result:{status:"ERROR",message:(error&&error.message)||"Terjadi kesalahan pada server."}});' +

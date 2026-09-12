@@ -252,11 +252,9 @@ const WEB_APP_URL =
   'https://script.google.com/macros/s/AKfycbwbLyCiePd1Vw3CgxBz0GdSDgaxTWI8Fsg7XUaKYJIOuqDK0qIEtgkINVVq0ZsFR_gCMg/exec';
 
 const RESPONSE_TIMEOUT_MS = 15000;
-// Panel cukup sebentar: beep + ucapan mulai ~1 dtk setelah hasil.
-const AUTO_NEXT_MS = 5000;
-const SAME_TOKEN_COOLDOWN_MS = 5000;
-// Tunggu Gemini max 1 dtk; jika belum siap → suara lokal (hindari jeda panjang).
-const GEMINI_FALLBACK_MS = 1000;
+// Hanya beep — tanpa TTS. Panel singkat lalu siap scan lagi.
+const AUTO_NEXT_MS = 2500;
+const SAME_TOKEN_COOLDOWN_MS = 2500;
 
 let scanner = null;
 let cameraRunning = false;
@@ -366,7 +364,6 @@ function toggleSound() {
     unlockAudio();
     // Beep uji lokal — wajib terdengar setelah ketuk tombol.
     playBeep('success');
-    speakLocalIndonesian('Suara aktif.', true);
   } else {
     button.classList.remove('active');
     button.innerText = 'AKTIFKAN SUARA';
@@ -598,8 +595,8 @@ function clearGeminiFallbackTimer() {
   }
 }
 
-/** Beep segera; tunggu Gemini max ~1 dtk. Jika belum siap → suara lokal (tanpa jeda panjang). */
-function playImmediateResultFeedback(kind, speechText) {
+/** Hanya beep hasil scan — tanpa TTS / ucapan. */
+function playImmediateResultFeedback(kind) {
   if (!soundEnabled || soundVolume <= 0) return;
 
   try {
@@ -608,22 +605,11 @@ function playImmediateResultFeedback(kind, speechText) {
     }
   } catch (e) {}
 
-  playBeep(kind);
-  pendingSpeechText = String(speechText || '').trim();
-  geminiAudioPlayed = false;
   clearGeminiFallbackTimer();
-
-  geminiFallbackTimer = setTimeout(function () {
-    if (!expectGeminiAudio || geminiAudioPlayed) return;
-    expectGeminiAudio = false;
-    // Tandai sudah diputar supaya Gemini terlambat tidak dobel-ucap.
-    if (lastResultKey) {
-      audioPlayedForRequest = lastResultKey;
-    } else {
-      audioPlayedForRequest = audioRequestId;
-    }
-    speakLocalIndonesian(pendingSpeechText, false);
-  }, GEMINI_FALLBACK_MS);
+  expectGeminiAudio = false;
+  pendingSpeechText = '';
+  geminiAudioPlayed = false;
+  playBeep(kind);
 }
 
 function playBeepWebAudio(kind) {
@@ -1095,27 +1081,11 @@ window.addEventListener('message', function (event) {
     return;
   }
 
-  if (event.data.type === 'CHECKIN_AUDIO') {
+  // TTS dimatikan: abaikan audio Gemini (hanya beep di UI).
+  if (event.data.type === 'CHECKIN_AUDIO' || event.data.type === 'CHECKIN_AUDIO_ERROR') {
     clearGeminiFallbackTimer();
-    handleCheckInAudio(event.data.audio);
-    return;
-  }
-
-  if (event.data.type === 'CHECKIN_AUDIO_ERROR') {
-    console.log(
-      'Gemini TTS error (check-in tetap valid):',
-      event.data.message || event.data
-    );
     expectGeminiAudio = false;
-    clearGeminiFallbackTimer();
-    if (!geminiAudioPlayed && pendingSpeechText) {
-      if (lastResultKey) {
-        audioPlayedForRequest = lastResultKey;
-      } else {
-        audioPlayedForRequest = audioRequestId;
-      }
-      speakLocalIndonesian(pendingSpeechText, false);
-    }
+    return;
   }
 });
 
@@ -1203,16 +1173,12 @@ function handleCheckInResult(result) {
     setStatus('Status: BERHASIL · siap scan berikutnya');
     vibrateSuccess();
 
-    expectGeminiAudio = true;
     lastResultKey =
       'CHECKED_IN|' +
       String(result.registrationId || '') +
       '|' +
       String(successName);
-    playImmediateResultFeedback(
-      'success',
-      buildSuccessSpeechText(successName)
-    );
+    playImmediateResultFeedback('success');
     return;
   }
 
@@ -1240,16 +1206,12 @@ function handleCheckInResult(result) {
     setStatus('Status: SUDAH DIGUNAKAN · siap scan berikutnya');
     vibrateWarn();
 
-    expectGeminiAudio = true;
     lastResultKey =
       'ALREADY_CHECKED_IN|' +
       String(result.registrationId || '') +
       '|' +
       String(dupName);
-    playImmediateResultFeedback(
-      'warn',
-      buildDuplicateSpeechText(dupName)
-    );
+    playImmediateResultFeedback('warn');
     return;
   }
 
