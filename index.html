@@ -64,6 +64,27 @@
       margin-top: 12px;
     }
 
+    .volume-row {
+      margin-top: 12px;
+      padding: 12px;
+      background: #f9fafb;
+      border-radius: 10px;
+    }
+
+    .volume-label {
+      display: flex;
+      justify-content: space-between;
+      font-size: 13px;
+      font-weight: bold;
+      color: #374151;
+      margin-bottom: 8px;
+    }
+
+    #volumeSlider {
+      width: 100%;
+      accent-color: #111827;
+    }
+
     .sound-button,
     .reset-button,
     .action-button {
@@ -176,6 +197,21 @@
       </button>
     </div>
 
+    <div class="volume-row">
+      <div class="volume-label">
+        <span>Volume</span>
+        <span id="volumeValue">80%</span>
+      </div>
+      <input
+        id="volumeSlider"
+        type="range"
+        min="0"
+        max="100"
+        value="80"
+        step="5"
+      >
+    </div>
+
     <button
       id="startButton"
       class="action-button"
@@ -223,11 +259,15 @@ let cameraRunning = false;
 let cameraStarting = false;
 let isProcessing = false;
 let soundEnabled = false;
+let soundVolume = 0.8;
 let audioCtx = null;
+let masterGain = null;
 let responseTimer = null;
 let autoNextTimer = null;
 let lastToken = '';
 let lastTokenAt = 0;
+let beepAudioSuccess = null;
+let beepAudioWarn = null;
 
 document.getElementById('soundButton').addEventListener('click', toggleSound);
 document.getElementById('startButton').addEventListener('click', function () {
@@ -241,6 +281,32 @@ document.getElementById('resetButton').addEventListener('click', function () {
 document.getElementById('manualNextButton').addEventListener('click', function () {
   unlockAudio();
   resetScanner();
+});
+document.getElementById('volumeSlider').addEventListener('input', function (event) {
+  soundVolume = Number(event.target.value) / 100;
+  document.getElementById('volumeValue').innerText =
+    Math.round(soundVolume * 100) + '%';
+
+  if (masterGain && audioCtx) {
+    masterGain.gain.setValueAtTime(
+      Math.max(0.0001, soundVolume),
+      audioCtx.currentTime
+    );
+  }
+
+  if (beepAudioSuccess) beepAudioSuccess.volume = soundVolume;
+  if (beepAudioWarn) beepAudioWarn.volume = Math.min(1, soundVolume);
+
+  // Moving the slider counts as user gesture — unlock + enable sound.
+  if (!soundEnabled) {
+    soundEnabled = true;
+    const button = document.getElementById('soundButton');
+    button.classList.add('active');
+    button.innerText = 'SUARA AKTIF';
+  }
+
+  unlockAudio();
+  playBeep('success');
 });
 
 function setStatus(message) {
@@ -281,72 +347,183 @@ function toggleSound() {
   }
 }
 
+function buildBeepWavDataUri(frequency, durationMs) {
+  const sampleRate = 22050;
+  const samples = Math.floor(sampleRate * durationMs / 1000);
+  const dataSize = samples * 2;
+  const buffer = new ArrayBuffer(44 + dataSize);
+  const view = new DataView(buffer);
+
+  function writeString(offset, value) {
+    for (let i = 0; i < value.length; i++) {
+      view.setUint8(offset + i, value.charCodeAt(i));
+    }
+  }
+
+  writeString(0, 'RIFF');
+  view.setUint32(4, 36 + dataSize, true);
+  writeString(8, 'WAVE');
+  writeString(12, 'fmt ');
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, 1, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * 2, true);
+  view.setUint16(32, 2, true);
+  view.setUint16(34, 16, true);
+  writeString(36, 'data');
+  view.setUint32(40, dataSize, true);
+
+  for (let i = 0; i < samples; i++) {
+    const t = i / sampleRate;
+    const envelope = Math.min(1, i / 200) * Math.min(1, (samples - i) / 400);
+    const sample = Math.sin(2 * Math.PI * frequency * t) * envelope * 0.9;
+    view.setInt16(44 + i * 2, sample * 0x7fff, true);
+  }
+
+  const bytes = new Uint8Array(buffer);
+  let binary = '';
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode.apply(
+      null,
+      bytes.subarray(i, i + chunk)
+    );
+  }
+
+  return 'data:audio/wav;base64,' + btoa(binary);
+}
+
+function prepareHtmlAudio() {
+  if (!beepAudioSuccess) {
+    beepAudioSuccess = new Audio(buildBeepWavDataUri(980, 220));
+    beepAudioSuccess.preload = 'auto';
+  }
+  if (!beepAudioWarn) {
+    beepAudioWarn = new Audio(buildBeepWavDataUri(520, 260));
+    beepAudioWarn.preload = 'auto';
+  }
+
+  beepAudioSuccess.volume = soundVolume;
+  beepAudioWarn.volume = Math.min(1, soundVolume);
+}
+
 function unlockAudio() {
   try {
+    prepareHtmlAudio();
+
     const Ctx = window.AudioContext || window.webkitAudioContext;
-    if (!Ctx) return;
+    if (Ctx) {
+      if (!audioCtx) {
+        audioCtx = new Ctx();
+        masterGain = audioCtx.createGain();
+        masterGain.gain.value = Math.max(0.0001, soundVolume);
+        masterGain.connect(audioCtx.destination);
+      }
 
-    if (!audioCtx) {
-      audioCtx = new Ctx();
+      if (audioCtx.state === 'suspended') {
+        audioCtx.resume();
+      }
+
+      const buffer = audioCtx.createBuffer(1, 1, 22050);
+      const source = audioCtx.createBufferSource();
+      source.buffer = buffer;
+      source.connect(masterGain || audioCtx.destination);
+      source.start(0);
     }
 
-    if (audioCtx.state === 'suspended') {
-      audioCtx.resume();
+    // Prime HTMLAudioElement on iOS/Android.
+    if (beepAudioSuccess) {
+      beepAudioSuccess.muted = true;
+      const p = beepAudioSuccess.play();
+      if (p && p.then) {
+        p.then(function () {
+          beepAudioSuccess.pause();
+          beepAudioSuccess.currentTime = 0;
+          beepAudioSuccess.muted = false;
+        }).catch(function () {
+          beepAudioSuccess.muted = false;
+        });
+      } else {
+        beepAudioSuccess.muted = false;
+      }
     }
-
-    // Silent buffer kick — needed by iOS Safari.
-    const buffer = audioCtx.createBuffer(1, 1, 22050);
-    const source = audioCtx.createBufferSource();
-    source.buffer = buffer;
-    source.connect(audioCtx.destination);
-    source.start(0);
   } catch (error) {
     console.log('Audio unlock:', error);
   }
 }
 
+function playBeepHtml(kind) {
+  prepareHtmlAudio();
+  const audio = kind === 'warn' ? beepAudioWarn : beepAudioSuccess;
+  audio.pause();
+  audio.currentTime = 0;
+  audio.volume = Math.max(0, Math.min(1, soundVolume));
+  const playPromise = audio.play();
+  if (playPromise && playPromise.catch) {
+    playPromise.catch(function (error) {
+      console.log('HTML audio play:', error);
+    });
+  }
+}
+
+function playBeepWebAudio(kind) {
+  if (!audioCtx || !masterGain) return;
+
+  const now = audioCtx.currentTime;
+  const peak = Math.max(0.05, soundVolume * 0.9);
+
+  function tone(freq, startOffset, length) {
+    const oscillator = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    const start = now + startOffset;
+
+    oscillator.type = 'square';
+    oscillator.frequency.setValueAtTime(freq, start);
+    gain.gain.setValueAtTime(0.0001, start);
+    gain.gain.exponentialRampToValueAtTime(peak, start + 0.015);
+    gain.gain.exponentialRampToValueAtTime(0.0001, start + length);
+
+    oscillator.connect(gain);
+    gain.connect(masterGain);
+    oscillator.start(start);
+    oscillator.stop(start + length + 0.02);
+  }
+
+  if (kind === 'warn') {
+    tone(520, 0, 0.22);
+  } else {
+    tone(980, 0, 0.16);
+    tone(1310, 0.12, 0.18);
+  }
+}
+
 function playBeep(kind) {
-  if (!soundEnabled) return;
+  if (!soundEnabled || soundVolume <= 0) return;
 
   try {
     unlockAudio();
-    if (!audioCtx) return;
+    prepareHtmlAudio();
 
-    const now = audioCtx.currentTime;
-    const oscillator = audioCtx.createOscillator();
-    const gain = audioCtx.createGain();
+    const audio = kind === 'warn' ? beepAudioWarn : beepAudioSuccess;
+    audio.pause();
+    audio.currentTime = 0;
+    audio.muted = false;
+    audio.volume = Math.max(0, Math.min(1, soundVolume));
 
-    oscillator.type = 'square';
-    oscillator.frequency.setValueAtTime(
-      kind === 'warn' ? 520 : 980,
-      now
-    );
-
-    gain.gain.setValueAtTime(0.0001, now);
-    gain.gain.exponentialRampToValueAtTime(0.28, now + 0.02);
-    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.22);
-
-    oscillator.connect(gain);
-    gain.connect(audioCtx.destination);
-
-    oscillator.start(now);
-    oscillator.stop(now + 0.24);
-
-    if (kind !== 'warn') {
-      const osc2 = audioCtx.createOscillator();
-      const gain2 = audioCtx.createGain();
-      osc2.type = 'square';
-      osc2.frequency.setValueAtTime(1310, now + 0.12);
-      gain2.gain.setValueAtTime(0.0001, now + 0.12);
-      gain2.gain.exponentialRampToValueAtTime(0.22, now + 0.14);
-      gain2.gain.exponentialRampToValueAtTime(0.0001, now + 0.32);
-      osc2.connect(gain2);
-      gain2.connect(audioCtx.destination);
-      osc2.start(now + 0.12);
-      osc2.stop(now + 0.34);
+    const playPromise = audio.play();
+    if (playPromise && playPromise.then) {
+      playPromise.catch(function () {
+        playBeepWebAudio(kind);
+      });
     }
   } catch (error) {
     console.log('Beep error:', error);
+    try {
+      playBeepWebAudio(kind);
+    } catch (e2) {
+      console.log('WebAudio fallback error:', e2);
+    }
   }
 }
 
