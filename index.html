@@ -2,7 +2,7 @@
 <html lang="id">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>PoC QR CHECK-IN</title>
   <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
   <style>
@@ -10,7 +10,7 @@
 
     body {
       margin: 0;
-      padding: 20px;
+      padding: 16px;
       font-family: Arial, Helvetica, sans-serif;
       background: #f4f6f8;
       color: #1f2937;
@@ -21,21 +21,22 @@
     .card {
       background: #ffffff;
       border-radius: 18px;
-      padding: 22px;
+      padding: 20px;
       box-shadow: 0 5px 20px rgba(0, 0, 0, 0.08);
     }
 
-    h1 { margin: 0 0 6px; font-size: 25px; }
+    h1 { margin: 0 0 4px; font-size: 24px; }
 
     .subtitle {
       color: #6b7280;
-      margin-bottom: 22px;
+      margin-bottom: 18px;
+      font-size: 14px;
     }
 
     .scanner-title {
-      font-size: 17px;
+      font-size: 16px;
       font-weight: bold;
-      margin-bottom: 12px;
+      margin-bottom: 10px;
     }
 
     #reader {
@@ -43,12 +44,12 @@
       overflow: hidden;
       border-radius: 14px;
       background: #111827;
-      min-height: 260px;
+      min-height: 280px;
     }
 
     .instruction {
-      margin-top: 16px;
-      padding: 14px;
+      margin-top: 12px;
+      padding: 12px;
       background: #f9fafb;
       border-radius: 10px;
       text-align: center;
@@ -56,20 +57,24 @@
       font-size: 14px;
     }
 
-    .sound-row {
-      margin-top: 14px;
+    .controls {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin-top: 12px;
     }
 
     .sound-button,
     .reset-button,
     .action-button {
       width: 100%;
-      padding: 13px;
+      padding: 14px 12px;
       border: 0;
       border-radius: 10px;
-      font-size: 15px;
+      font-size: 14px;
       font-weight: bold;
       cursor: pointer;
+      -webkit-tap-highlight-color: transparent;
     }
 
     .sound-button {
@@ -78,21 +83,21 @@
     }
 
     .sound-button.active {
-      background: #111827;
+      background: #065f46;
       color: #ffffff;
     }
 
     .action-button {
-      margin-top: 12px;
       background: #374151;
       color: #ffffff;
       display: none;
+      margin-top: 10px;
     }
 
     .result {
       display: none;
-      margin-top: 18px;
-      padding: 18px;
+      margin-top: 14px;
+      padding: 16px;
       border-radius: 12px;
     }
 
@@ -115,25 +120,28 @@
     }
 
     .result-title {
-      font-size: 21px;
+      font-size: 20px;
       font-weight: bold;
-      margin-bottom: 12px;
+      margin-bottom: 10px;
     }
 
-    .detail { margin: 7px 0; }
+    .detail { margin: 6px 0; font-size: 15px; }
 
     .status {
-      margin-top: 18px;
+      margin-top: 14px;
       text-align: center;
       color: #6b7280;
       font-size: 13px;
+      font-weight: bold;
     }
 
     .reset-button {
-      margin-top: 15px;
+      margin-top: 12px;
       background: #111827;
       color: #ffffff;
       display: none;
+      font-size: 16px;
+      padding: 16px;
     }
   </style>
 </head>
@@ -150,14 +158,21 @@
       Arahkan QR ke kamera
     </div>
 
-    <div class="sound-row">
+    <div class="controls">
       <button
         id="soundButton"
         class="sound-button"
         type="button"
-        onclick="toggleSound()"
       >
         AKTIFKAN SUARA
+      </button>
+      <button
+        id="manualNextButton"
+        class="sound-button"
+        type="button"
+        style="display:none;"
+      >
+        LANJUT SCAN
       </button>
     </div>
 
@@ -165,7 +180,6 @@
       id="startButton"
       class="action-button"
       type="button"
-      onclick="startScanner()"
     >
       AKTIFKAN KAMERA
     </button>
@@ -179,7 +193,6 @@
       id="resetButton"
       class="reset-button"
       type="button"
-      onclick="resetScanner()"
     >
       SCAN PESERTA BERIKUTNYA
     </button>
@@ -190,11 +203,6 @@
   </div>
 </div>
 
-<!--
-  Hidden Apps Script bridge.
-  Token dikirim via ?token= karena nested googleusercontent iframe
-  tidak menerima postMessage dari GitHub Pages dengan andal.
--->
 <iframe
   id="appsScriptFrame"
   title="Apps Script bridge"
@@ -207,14 +215,31 @@ const WEB_APP_URL =
   'https://script.google.com/macros/s/AKfycbwbLyCiePd1Vw3CgxBz0GdSDgaxTWI8Fsg7XUaKYJIOuqDK0qIEtgkINVVq0ZsFR_gCMg/exec';
 
 const RESPONSE_TIMEOUT_MS = 20000;
+const AUTO_NEXT_MS = 2200;
 
 let scanner = null;
+let cameraRunning = false;
 let isProcessing = false;
 let soundEnabled = false;
 let audioCtx = null;
 let responseTimer = null;
+let autoNextTimer = null;
 let lastToken = '';
 let lastTokenAt = 0;
+
+document.getElementById('soundButton').addEventListener('click', toggleSound);
+document.getElementById('startButton').addEventListener('click', function () {
+  unlockAudio();
+  startScanner();
+});
+document.getElementById('resetButton').addEventListener('click', function () {
+  unlockAudio();
+  resetScanner();
+});
+document.getElementById('manualNextButton').addEventListener('click', function () {
+  unlockAudio();
+  resetScanner();
+});
 
 function setStatus(message) {
   document.getElementById('status').innerText = message;
@@ -247,7 +272,7 @@ function toggleSound() {
     button.classList.add('active');
     button.innerText = 'SUARA AKTIF';
     unlockAudio();
-    playBeep();
+    playBeep('success');
   } else {
     button.classList.remove('active');
     button.innerText = 'AKTIFKAN SUARA';
@@ -258,36 +283,66 @@ function unlockAudio() {
   try {
     const Ctx = window.AudioContext || window.webkitAudioContext;
     if (!Ctx) return;
-    if (!audioCtx) audioCtx = new Ctx();
+
+    if (!audioCtx) {
+      audioCtx = new Ctx();
+    }
+
     if (audioCtx.state === 'suspended') {
       audioCtx.resume();
     }
+
+    // Silent buffer kick — needed by iOS Safari.
+    const buffer = audioCtx.createBuffer(1, 1, 22050);
+    const source = audioCtx.createBufferSource();
+    source.buffer = buffer;
+    source.connect(audioCtx.destination);
+    source.start(0);
   } catch (error) {
     console.log('Audio unlock:', error);
   }
 }
 
-function playBeep() {
+function playBeep(kind) {
   if (!soundEnabled) return;
 
   try {
     unlockAudio();
     if (!audioCtx) return;
 
+    const now = audioCtx.currentTime;
     const oscillator = audioCtx.createOscillator();
     const gain = audioCtx.createGain();
 
-    oscillator.type = 'sine';
-    oscillator.frequency.value = 880;
-    gain.gain.value = 0.05;
+    oscillator.type = 'square';
+    oscillator.frequency.setValueAtTime(
+      kind === 'warn' ? 520 : 980,
+      now
+    );
+
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.exponentialRampToValueAtTime(0.28, now + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.22);
 
     oscillator.connect(gain);
     gain.connect(audioCtx.destination);
 
-    oscillator.start();
-    setTimeout(function () {
-      oscillator.stop();
-    }, 180);
+    oscillator.start(now);
+    oscillator.stop(now + 0.24);
+
+    if (kind !== 'warn') {
+      const osc2 = audioCtx.createOscillator();
+      const gain2 = audioCtx.createGain();
+      osc2.type = 'square';
+      osc2.frequency.setValueAtTime(1310, now + 0.12);
+      gain2.gain.setValueAtTime(0.0001, now + 0.12);
+      gain2.gain.exponentialRampToValueAtTime(0.22, now + 0.14);
+      gain2.gain.exponentialRampToValueAtTime(0.0001, now + 0.32);
+      osc2.connect(gain2);
+      gain2.connect(audioCtx.destination);
+      osc2.start(now + 0.12);
+      osc2.stop(now + 0.34);
+    }
   } catch (error) {
     console.log('Beep error:', error);
   }
@@ -295,7 +350,13 @@ function playBeep() {
 
 function vibrateSuccess() {
   if (navigator.vibrate) {
-    navigator.vibrate([80, 40, 80]);
+    navigator.vibrate([90, 50, 90]);
+  }
+}
+
+function vibrateWarn() {
+  if (navigator.vibrate) {
+    navigator.vibrate([40, 30, 40]);
   }
 }
 
@@ -303,6 +364,13 @@ function clearResponseTimer() {
   if (responseTimer) {
     clearTimeout(responseTimer);
     responseTimer = null;
+  }
+}
+
+function clearAutoNextTimer() {
+  if (autoNextTimer) {
+    clearTimeout(autoNextTimer);
+    autoNextTimer = null;
   }
 }
 
@@ -318,6 +386,12 @@ function showResult(type, title, content) {
   result.className = 'result ' + type;
   result.style.display = 'block';
   document.getElementById('resetButton').style.display = 'block';
+  document.getElementById('manualNextButton').style.display = 'block';
+
+  clearAutoNextTimer();
+  autoNextTimer = setTimeout(function () {
+    resetScanner();
+  }, AUTO_NEXT_MS);
 }
 
 function cameraErrorMessage(error) {
@@ -330,13 +404,12 @@ function cameraErrorMessage(error) {
     text.indexOf('permission') !== -1 ||
     text.indexOf('denied') !== -1
   ) {
-    return 'Izin kamera ditolak. Izinkan kamera di pengaturan browser, lalu ketuk AKTIFKAN KAMERA.';
+    return 'Izin kamera ditolak. Izinkan kamera, lalu ketuk AKTIFKAN KAMERA.';
   }
 
   if (
     text.indexOf('notfound') !== -1 ||
-    text.indexOf('devices not found') !== -1 ||
-    text.indexOf('requested device not found') !== -1
+    text.indexOf('devices not found') !== -1
   ) {
     return 'Kamera tidak tersedia pada perangkat ini.';
   }
@@ -346,32 +419,24 @@ function cameraErrorMessage(error) {
     text.indexOf('trackstart') !== -1 ||
     text.indexOf('in use') !== -1
   ) {
-    return 'Kamera sedang dipakai aplikasi lain. Tutup aplikasi tersebut lalu coba lagi.';
+    return 'Kamera sedang dipakai aplikasi lain.';
   }
 
   if (window.isSecureContext === false) {
     return 'Kamera membutuhkan HTTPS.';
   }
 
-  return 'Kamera tidak dapat digunakan. Ketuk AKTIFKAN KAMERA untuk mencoba lagi.';
+  return 'Kamera tidak dapat digunakan. Ketuk AKTIFKAN KAMERA.';
 }
 
 function startScanner() {
-  if (isProcessing) return;
-
   showStartButton(false);
   document.getElementById('result').style.display = 'none';
   document.getElementById('resetButton').style.display = 'none';
+  document.getElementById('manualNextButton').style.display = 'none';
 
-  if (scanner) {
-    scanner.stop().then(function () {
-      scanner.clear();
-      scanner = null;
-      beginCamera();
-    }).catch(function () {
-      scanner = null;
-      beginCamera();
-    });
+  if (cameraRunning && scanner) {
+    resumeScanner();
     return;
   }
 
@@ -385,42 +450,118 @@ function beginCamera() {
     return;
   }
 
-  scanner = new Html5Qrcode('reader');
+  // Reuse one instance; recreate only if needed.
+  if (!scanner) {
+    scanner = new Html5Qrcode('reader');
+  }
 
   const config = {
-    fps: 10,
-    qrbox: { width: 250, height: 250 },
-    aspectRatio: 1.0
+    fps: 15,
+    qrbox: function (viewfinderWidth, viewfinderHeight) {
+      const edge = Math.floor(Math.min(viewfinderWidth, viewfinderHeight) * 0.72);
+      return { width: edge, height: edge };
+    },
+    aspectRatio: 1.0,
+    disableFlip: false
   };
 
   setStatus('Status: Meminta izin kamera...');
 
   scanner
     .start(
-      { facingMode: 'environment' },
+      { facingMode: { exact: 'environment' } },
       config,
       onScanSuccess,
       onScanError
     )
     .then(function () {
+      cameraRunning = true;
+      isProcessing = false;
       setStatus('Status: SIAP SCAN');
+    })
+    .catch(function () {
+      // Fallback if exact rear camera fails (some devices).
+      return scanner.start(
+        { facingMode: 'environment' },
+        config,
+        onScanSuccess,
+        onScanError
+      );
+    })
+    .then(function () {
+      if (!cameraRunning) {
+        cameraRunning = true;
+        isProcessing = false;
+        setStatus('Status: SIAP SCAN');
+      }
     })
     .catch(function (error) {
       console.error(error);
+      cameraRunning = false;
       setStatus('Status: ' + cameraErrorMessage(error));
       showStartButton(true);
-      scanner = null;
     });
 }
 
-function stopScannerSoft() {
-  if (!scanner) {
-    return Promise.resolve();
+function pauseScanner() {
+  if (!scanner || !cameraRunning) return;
+
+  try {
+    if (typeof scanner.pause === 'function') {
+      scanner.pause(true);
+      return;
+    }
+  } catch (error) {
+    console.log('Pause error:', error);
+  }
+}
+
+function resumeScanner() {
+  clearAutoNextTimer();
+  isProcessing = false;
+
+  document.getElementById('result').style.display = 'none';
+  document.getElementById('resetButton').style.display = 'none';
+  document.getElementById('manualNextButton').style.display = 'none';
+
+  if (scanner && cameraRunning && typeof scanner.resume === 'function') {
+    try {
+      scanner.resume();
+      setStatus('Status: SIAP SCAN');
+      return;
+    } catch (error) {
+      console.log('Resume error:', error);
+    }
   }
 
-  return scanner.stop().catch(function (error) {
-    console.log('Scanner stop:', error);
-  });
+  // Fallback: clean restart
+  restartCameraHard();
+}
+
+function restartCameraHard() {
+  setStatus('Status: Menyiapkan kamera...');
+
+  const restart = function () {
+    scanner = null;
+    cameraRunning = false;
+    const reader = document.getElementById('reader');
+    reader.innerHTML = '';
+    beginCamera();
+  };
+
+  if (scanner && cameraRunning) {
+    scanner.stop()
+      .then(function () {
+        try { scanner.clear(); } catch (e) {}
+        restart();
+      })
+      .catch(function () {
+        restart();
+      });
+    return;
+  }
+
+  restart();
 }
 
 function onScanSuccess(decodedText) {
@@ -430,7 +571,7 @@ function onScanSuccess(decodedText) {
   if (!token) return;
 
   const now = Date.now();
-  if (token === lastToken && now - lastTokenAt < 2500) {
+  if (token === lastToken && now - lastTokenAt < 1800) {
     return;
   }
 
@@ -438,15 +579,13 @@ function onScanSuccess(decodedText) {
   lastTokenAt = now;
   isProcessing = true;
 
-  setStatus('Status: QR terbaca. Memeriksa data peserta...');
-
-  stopScannerSoft().then(function () {
-    sendTokenToAppsScript(token);
-  });
+  setStatus('Status: QR terbaca. Memeriksa data...');
+  pauseScanner();
+  sendTokenToAppsScript(token);
 }
 
 function onScanError() {
-  // Ignore continuous scan miss events.
+  // Ignore continuous miss events.
 }
 
 function sendTokenToAppsScript(token) {
@@ -475,7 +614,6 @@ function sendTokenToAppsScript(token) {
     });
   }, RESPONSE_TIMEOUT_MS);
 
-  // Reload iframe with token. Requires doGet() token handler on Apps Script.
   frame.src =
     WEB_APP_URL +
     '?token=' +
@@ -497,8 +635,6 @@ window.addEventListener('message', function (event) {
 });
 
 function handleCheckInResult(result) {
-  if (!isProcessing && !result) return;
-
   clearResponseTimer();
   isProcessing = true;
 
@@ -509,6 +645,7 @@ function handleCheckInResult(result) {
       'Tidak ada respons dari server.'
     );
     setStatus('Status: Gagal terhubung ke server');
+    playBeep('warn');
     return;
   }
 
@@ -528,8 +665,8 @@ function handleCheckInResult(result) {
       '</div>';
 
     showResult('success', '✓ CHECK-IN BERHASIL', content);
-    setStatus('Status: CHECK-IN BERHASIL');
-    playBeep();
+    setStatus('Status: CHECK-IN BERHASIL · lanjut otomatis...');
+    playBeep('success');
     vibrateSuccess();
     return;
   }
@@ -550,7 +687,9 @@ function handleCheckInResult(result) {
       '</div>';
 
     showResult('warning', '⚠ SUDAH CHECK-IN', content);
-    setStatus('Status: SUDAH CHECK-IN');
+    setStatus('Status: SUDAH CHECK-IN · lanjut otomatis...');
+    playBeep('warn');
+    vibrateWarn();
     return;
   }
 
@@ -560,7 +699,8 @@ function handleCheckInResult(result) {
       '✕ QR TIDAK VALID',
       escapeHtml(result.message || 'QR Token tidak ditemukan.')
     );
-    setStatus('Status: QR TIDAK VALID');
+    setStatus('Status: QR TIDAK VALID · lanjut otomatis...');
+    playBeep('warn');
     return;
   }
 
@@ -570,25 +710,17 @@ function handleCheckInResult(result) {
     escapeHtml(result.message || 'Silakan coba lagi.')
   );
   setStatus('Status: Gagal terhubung ke server');
+  playBeep('warn');
 }
 
 function resetScanner() {
   clearResponseTimer();
-  isProcessing = false;
-  document.getElementById('resetButton').style.display = 'none';
-  document.getElementById('result').style.display = 'none';
-  setStatus('Status: Menyiapkan kamera...');
-
-  const frame = document.getElementById('appsScriptFrame');
-  if (frame) {
-    frame.src = WEB_APP_URL;
-  }
-
-  startScanner();
+  clearAutoNextTimer();
+  unlockAudio();
+  resumeScanner();
 }
 
 window.addEventListener('load', function () {
-  // Auto-start; if browser blocks without gesture, tombol AKTIFKAN KAMERA muncul.
   startScanner();
 });
 </script>
