@@ -343,7 +343,11 @@ function toggleSound() {
     if (window.speechSynthesis) {
       window.speechSynthesis.cancel();
     }
+    // Demo: sukses dulu, lalu failed — supaya bedanya jelas.
     playBeep('success');
+    setTimeout(function () {
+      playAlreadyOrFailSound();
+    }, 450);
   } else {
     button.classList.remove('active');
     button.innerText = 'AKTIFKAN SUARA';
@@ -384,6 +388,63 @@ function buildBeepWavDataUri(frequency, durationMs) {
     view.setInt16(44 + i * 2, sample * 0x7fff, true);
   }
 
+  return wavBufferToDataUri(buffer);
+}
+
+/*
+ * Suara FAILED khas: 3x buzz rendah (bzz-bzz-bzz), jelas beda dari beep sukses.
+ */
+function buildFailedWavDataUri() {
+  const sampleRate = 22050;
+  const durationMs = 700;
+  const samples = Math.floor(sampleRate * durationMs / 1000);
+  const dataSize = samples * 2;
+  const buffer = new ArrayBuffer(44 + dataSize);
+  const view = new DataView(buffer);
+
+  function writeString(offset, value) {
+    for (let i = 0; i < value.length; i++) {
+      view.setUint8(offset + i, value.charCodeAt(i));
+    }
+  }
+
+  writeString(0, 'RIFF');
+  view.setUint32(4, 36 + dataSize, true);
+  writeString(8, 'WAVE');
+  writeString(12, 'fmt ');
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, 1, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * 2, true);
+  view.setUint16(32, 2, true);
+  view.setUint16(34, 16, true);
+  writeString(36, 'data');
+  view.setUint32(40, dataSize, true);
+
+  for (let i = 0; i < samples; i++) {
+    const t = i / sampleRate;
+    // 3 pulses: on 0-0.14, 0.22-0.36, 0.44-0.58
+    const inPulse =
+      (t >= 0 && t < 0.14) ||
+      (t >= 0.22 && t < 0.36) ||
+      (t >= 0.44 && t < 0.58);
+
+    let sample = 0;
+    if (inPulse) {
+      // Harsh low buzz (square-ish)
+      const saw = ((t * 180) % 1) * 2 - 1;
+      const low = Math.sin(2 * Math.PI * 180 * t);
+      sample = (saw * 0.55 + low * 0.45) * 0.95;
+    }
+
+    view.setInt16(44 + i * 2, sample * 0x7fff, true);
+  }
+
+  return wavBufferToDataUri(buffer);
+}
+
+function wavBufferToDataUri(buffer) {
   const bytes = new Uint8Array(buffer);
   let binary = '';
   const chunk = 0x8000;
@@ -393,17 +454,16 @@ function buildBeepWavDataUri(frequency, durationMs) {
       bytes.subarray(i, i + chunk)
     );
   }
-
   return 'data:audio/wav;base64,' + btoa(binary);
 }
 
 function prepareHtmlAudio() {
   if (!beepAudioSuccess) {
-    beepAudioSuccess = new Audio(buildBeepWavDataUri(980, 220));
+    beepAudioSuccess = new Audio(buildBeepWavDataUri(1100, 180));
     beepAudioSuccess.preload = 'auto';
   }
   if (!beepAudioWarn) {
-    beepAudioWarn = new Audio(buildBeepWavDataUri(520, 260));
+    beepAudioWarn = new Audio(buildFailedWavDataUri());
     beepAudioWarn.preload = 'auto';
   }
 
@@ -435,38 +495,29 @@ function unlockAudio() {
       source.start(0);
     }
 
-    // Prime HTMLAudioElement on iOS/Android.
-    if (beepAudioSuccess) {
-      beepAudioSuccess.muted = true;
-      const p = beepAudioSuccess.play();
+    // Prime both success + failed clips on iOS/Android.
+    [beepAudioSuccess, beepAudioWarn].forEach(function (clip) {
+      if (!clip) return;
+      clip.muted = true;
+      const p = clip.play();
       if (p && p.then) {
         p.then(function () {
-          beepAudioSuccess.pause();
-          beepAudioSuccess.currentTime = 0;
-          beepAudioSuccess.muted = false;
+          clip.pause();
+          clip.currentTime = 0;
+          clip.muted = false;
         }).catch(function () {
-          beepAudioSuccess.muted = false;
+          clip.muted = false;
         });
       } else {
-        beepAudioSuccess.muted = false;
+        clip.muted = false;
       }
+    });
+
+    if (window.speechSynthesis) {
+      window.speechSynthesis.getVoices();
     }
   } catch (error) {
     console.log('Audio unlock:', error);
-  }
-}
-
-function playBeepHtml(kind) {
-  prepareHtmlAudio();
-  const audio = kind === 'warn' ? beepAudioWarn : beepAudioSuccess;
-  audio.pause();
-  audio.currentTime = 0;
-  audio.volume = Math.max(0, Math.min(1, soundVolume));
-  const playPromise = audio.play();
-  if (playPromise && playPromise.catch) {
-    playPromise.catch(function (error) {
-      console.log('HTML audio play:', error);
-    });
   }
 }
 
@@ -474,17 +525,17 @@ function playBeepWebAudio(kind) {
   if (!audioCtx || !masterGain) return;
 
   const now = audioCtx.currentTime;
-  const peak = Math.max(0.05, soundVolume * 0.9);
+  const peak = Math.max(0.08, soundVolume * 0.95);
 
-  function tone(freq, startOffset, length) {
+  function tone(type, freq, startOffset, length) {
     const oscillator = audioCtx.createOscillator();
     const gain = audioCtx.createGain();
     const start = now + startOffset;
 
-    oscillator.type = 'square';
+    oscillator.type = type;
     oscillator.frequency.setValueAtTime(freq, start);
     gain.gain.setValueAtTime(0.0001, start);
-    gain.gain.exponentialRampToValueAtTime(peak, start + 0.015);
+    gain.gain.exponentialRampToValueAtTime(peak, start + 0.01);
     gain.gain.exponentialRampToValueAtTime(0.0001, start + length);
 
     oscillator.connect(gain);
@@ -493,11 +544,15 @@ function playBeepWebAudio(kind) {
     oscillator.stop(start + length + 0.02);
   }
 
-  if (kind === 'warn') {
-    tone(520, 0, 0.22);
+  if (kind === 'warn' || kind === 'failed') {
+    // Triple low buzz = FAILED
+    tone('square', 180, 0, 0.12);
+    tone('square', 160, 0.18, 0.12);
+    tone('square', 140, 0.36, 0.14);
   } else {
-    tone(980, 0, 0.16);
-    tone(1310, 0.12, 0.18);
+    // Success: high ding-ding
+    tone('sine', 988, 0, 0.12);
+    tone('sine', 1319, 0.12, 0.16);
   }
 }
 
@@ -508,9 +563,10 @@ function playBeep(kind) {
     unlockAudio();
     prepareHtmlAudio();
 
-    const audio = kind === 'warn' || kind === 'failed'
+    const audio = (kind === 'warn' || kind === 'failed')
       ? beepAudioWarn
       : beepAudioSuccess;
+
     audio.pause();
     audio.currentTime = 0;
     audio.muted = false;
@@ -519,13 +575,18 @@ function playBeep(kind) {
     const playPromise = audio.play();
     if (playPromise && playPromise.then) {
       playPromise.catch(function () {
-        playBeepWebAudio(kind === 'failed' ? 'warn' : kind);
+        playBeepWebAudio(kind);
       });
+    }
+
+    // Always also fire WebAudio for failed so difference is obvious.
+    if (kind === 'warn' || kind === 'failed') {
+      playBeepWebAudio('failed');
     }
   } catch (error) {
     console.log('Beep error:', error);
     try {
-      playBeepWebAudio(kind === 'failed' ? 'warn' : kind);
+      playBeepWebAudio(kind);
     } catch (e2) {
       console.log('WebAudio fallback error:', e2);
     }
@@ -534,22 +595,39 @@ function playBeep(kind) {
 
 function speakFailed() {
   if (!soundEnabled || soundVolume <= 0) return;
-  if (!window.speechSynthesis) {
-    playBeep('failed');
-    return;
-  }
+  if (!window.speechSynthesis) return;
 
   try {
     window.speechSynthesis.cancel();
-    const utter = new SpeechSynthesisUtterance('Failed');
-    utter.lang = 'en-US';
-    utter.rate = 1.05;
-    utter.pitch = 0.85;
-    utter.volume = Math.max(0, Math.min(1, soundVolume));
-    window.speechSynthesis.speak(utter);
+
+    const speak = function () {
+      const utter = new SpeechSynthesisUtterance('Failed');
+      utter.lang = 'en-US';
+      utter.rate = 0.95;
+      utter.pitch = 0.7;
+      utter.volume = Math.max(0, Math.min(1, soundVolume));
+
+      const voices = window.speechSynthesis.getVoices() || [];
+      const en = voices.find(function (v) {
+        return v.lang && v.lang.toLowerCase().indexOf('en') === 0;
+      });
+      if (en) utter.voice = en;
+
+      window.speechSynthesis.speak(utter);
+    };
+
+    // Some browsers load voices async.
+    if ((window.speechSynthesis.getVoices() || []).length === 0) {
+      window.speechSynthesis.onvoiceschanged = function () {
+        window.speechSynthesis.onvoiceschanged = null;
+        speak();
+      };
+      setTimeout(speak, 120);
+    } else {
+      speak();
+    }
   } catch (error) {
     console.log('Speech error:', error);
-    playBeep('failed');
   }
 }
 
@@ -558,9 +636,11 @@ function playCheckInSuccessSound() {
 }
 
 function playAlreadyOrFailSound() {
-  // "Sudah check-in" / invalid / error → voice "Failed"
-  speakFailed();
+  // Buzz failed dulu (selalu terdengar), lalu voice "Failed".
   playBeep('failed');
+  setTimeout(function () {
+    speakFailed();
+  }, 280);
 }
 
 function vibrateSuccess() {
