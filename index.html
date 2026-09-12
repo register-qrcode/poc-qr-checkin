@@ -1074,20 +1074,10 @@ function sendTokenToAppsScript(token) {
     });
   }, RESPONSE_TIMEOUT_MS);
 
-  // Bridge cepat: kirim token tanpa reload iframe (hindari jeda cold-start).
-  if (bridgeReady && frame.contentWindow) {
-    try {
-      frame.contentWindow.postMessage(
-        { type: 'CHECKIN_REQUEST', token: token },
-        '*'
-      );
-      return;
-    } catch (ePost) {
-      console.log('Bridge postMessage gagal, fallback reload:', ePost);
-    }
-  }
-
-  // Bridge belum siap: fallback URL ?token= (tetap andal).
+  // Selalu ?token= URL. CHECKIN_REQUEST ke iframe luar Apps Script
+  // tidak sampai ke HTML bersarang (googleusercontent) — bridge postMessage hang.
+  // Hasil balik memakai window.top.postMessage dari doGet (bukan window.parent).
+  bridgeReady = false;
   sendTokenViaUrlFallback(token);
 }
 
