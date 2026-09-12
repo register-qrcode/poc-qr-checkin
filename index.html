@@ -959,17 +959,36 @@ window.addEventListener('message', function (event) {
       event.data.message || event.data
     );
     expectGeminiAudio = false;
-    // Fallback beep supaya petugas tetap dengar feedback.
+
+    var fallbackText = '';
     if (lastResultKey.indexOf('CHECKED_IN|') === 0) {
       playBeep('success');
+      var partsOk = lastResultKey.split('|');
+      fallbackText = 'Check-in berhasil. ' + (partsOk[2] || '') + '.';
     } else if (lastResultKey.indexOf('ALREADY_CHECKED_IN|') === 0) {
       playBeep('warn');
+      var partsDup = lastResultKey.split('|');
+      fallbackText = 'Sudah dipakai check-in oleh ' + (partsDup[2] || '') + '.';
     }
+
+    // Cadangan suara browser jika Gemini 429/error.
+    if (fallbackText && window.speechSynthesis) {
+      try {
+        unlockAudio();
+        window.speechSynthesis.cancel();
+        var utter = new SpeechSynthesisUtterance(fallbackText);
+        utter.lang = 'id-ID';
+        utter.rate = 1;
+        utter.volume = Math.max(0, Math.min(1, soundVolume));
+        window.speechSynthesis.speak(utter);
+      } catch (e) {}
+    }
+
     var statusEl = document.getElementById('status');
     if (statusEl && statusEl.innerText) {
       statusEl.innerText =
         statusEl.innerText.replace(/ · .*$/, '') +
-        ' · suara TTS gagal (beep cadangan)';
+        ' · suara cadangan (Gemini limit)';
     }
   }
 });
