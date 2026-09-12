@@ -215,10 +215,12 @@ const WEB_APP_URL =
   'https://script.google.com/macros/s/AKfycbwbLyCiePd1Vw3CgxBz0GdSDgaxTWI8Fsg7XUaKYJIOuqDK0qIEtgkINVVq0ZsFR_gCMg/exec';
 
 const RESPONSE_TIMEOUT_MS = 20000;
-const AUTO_NEXT_MS = 2200;
+const AUTO_NEXT_MS = 1800;
+const SAME_TOKEN_COOLDOWN_MS = 5000;
 
 let scanner = null;
 let cameraRunning = false;
+let cameraStarting = false;
 let isProcessing = false;
 let soundEnabled = false;
 let audioCtx = null;
@@ -390,7 +392,7 @@ function showResult(type, title, content) {
 
   clearAutoNextTimer();
   autoNextTimer = setTimeout(function () {
-    resetScanner();
+    readyForNextScan();
   }, AUTO_NEXT_MS);
 }
 
@@ -431,12 +433,9 @@ function cameraErrorMessage(error) {
 
 function startScanner() {
   showStartButton(false);
-  document.getElementById('result').style.display = 'none';
-  document.getElementById('resetButton').style.display = 'none';
-  document.getElementById('manualNextButton').style.display = 'none';
 
   if (cameraRunning && scanner) {
-    resumeScanner();
+    readyForNextScan();
     return;
   }
 
@@ -444,134 +443,82 @@ function startScanner() {
 }
 
 function beginCamera() {
+  if (cameraStarting || cameraRunning) return;
+
   if (typeof Html5Qrcode === 'undefined') {
     setStatus('Status: Library scanner gagal dimuat.');
     showStartButton(true);
     return;
   }
 
-  // Reuse one instance; recreate only if needed.
+  cameraStarting = true;
+
   if (!scanner) {
     scanner = new Html5Qrcode('reader');
   }
 
   const config = {
-    fps: 15,
+    fps: 12,
     qrbox: function (viewfinderWidth, viewfinderHeight) {
-      const edge = Math.floor(Math.min(viewfinderWidth, viewfinderHeight) * 0.72);
+      const edge = Math.floor(Math.min(viewfinderWidth, viewfinderHeight) * 0.7);
       return { width: edge, height: edge };
     },
-    aspectRatio: 1.0,
-    disableFlip: false
+    aspectRatio: 1.0
   };
 
   setStatus('Status: Meminta izin kamera...');
 
   scanner
     .start(
-      { facingMode: { exact: 'environment' } },
+      { facingMode: 'environment' },
       config,
       onScanSuccess,
       onScanError
     )
     .then(function () {
+      cameraStarting = false;
       cameraRunning = true;
       isProcessing = false;
       setStatus('Status: SIAP SCAN');
     })
-    .catch(function () {
-      // Fallback if exact rear camera fails (some devices).
-      return scanner.start(
-        { facingMode: 'environment' },
-        config,
-        onScanSuccess,
-        onScanError
-      );
-    })
-    .then(function () {
-      if (!cameraRunning) {
-        cameraRunning = true;
-        isProcessing = false;
-        setStatus('Status: SIAP SCAN');
-      }
-    })
     .catch(function (error) {
       console.error(error);
+      cameraStarting = false;
       cameraRunning = false;
       setStatus('Status: ' + cameraErrorMessage(error));
       showStartButton(true);
     });
 }
 
-function pauseScanner() {
-  if (!scanner || !cameraRunning) return;
-
-  try {
-    if (typeof scanner.pause === 'function') {
-      scanner.pause(true);
-      return;
-    }
-  } catch (error) {
-    console.log('Pause error:', error);
-  }
-}
-
-function resumeScanner() {
+/*
+ * Kamera TETAP NYALA antar peserta.
+ * Hanya buka kunci flag agar QR berikutnya bisa diproses.
+ */
+function readyForNextScan() {
   clearAutoNextTimer();
+  clearResponseTimer();
   isProcessing = false;
 
   document.getElementById('result').style.display = 'none';
   document.getElementById('resetButton').style.display = 'none';
   document.getElementById('manualNextButton').style.display = 'none';
 
-  if (scanner && cameraRunning && typeof scanner.resume === 'function') {
-    try {
-      scanner.resume();
-      setStatus('Status: SIAP SCAN');
-      return;
-    } catch (error) {
-      console.log('Resume error:', error);
-    }
-  }
-
-  // Fallback: clean restart
-  restartCameraHard();
-}
-
-function restartCameraHard() {
-  setStatus('Status: Menyiapkan kamera...');
-
-  const restart = function () {
-    scanner = null;
-    cameraRunning = false;
-    const reader = document.getElementById('reader');
-    reader.innerHTML = '';
+  if (!cameraRunning) {
     beginCamera();
-  };
-
-  if (scanner && cameraRunning) {
-    scanner.stop()
-      .then(function () {
-        try { scanner.clear(); } catch (e) {}
-        restart();
-      })
-      .catch(function () {
-        restart();
-      });
     return;
   }
 
-  restart();
+  setStatus('Status: SIAP SCAN');
 }
 
 function onScanSuccess(decodedText) {
-  if (isProcessing) return;
+  if (isProcessing || !cameraRunning) return;
 
   const token = String(decodedText || '').trim();
   if (!token) return;
 
   const now = Date.now();
-  if (token === lastToken && now - lastTokenAt < 1800) {
+  if (token === lastToken && now - lastTokenAt < SAME_TOKEN_COOLDOWN_MS) {
     return;
   }
 
@@ -580,7 +527,6 @@ function onScanSuccess(decodedText) {
   isProcessing = true;
 
   setStatus('Status: QR terbaca. Memeriksa data...');
-  pauseScanner();
   sendTokenToAppsScript(token);
 }
 
@@ -714,10 +660,8 @@ function handleCheckInResult(result) {
 }
 
 function resetScanner() {
-  clearResponseTimer();
-  clearAutoNextTimer();
   unlockAudio();
-  resumeScanner();
+  readyForNextScan();
 }
 
 window.addEventListener('load', function () {
