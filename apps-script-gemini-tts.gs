@@ -145,23 +145,46 @@ function synthesizeCheckInSpeech(text, statusKind) {
     };
 
 
-    var response =
-      UrlFetchApp.fetch(
-        url,
-        {
-          method: 'post',
-          contentType: 'application/json',
-          payload: JSON.stringify(payload),
-          muteHttpExceptions: true
-        }
-      );
+    var response = null;
+    var code = 0;
+    var bodyText = '';
+    var maxAttempts = 4;
 
+    for (var attempt = 1; attempt <= maxAttempts; attempt++) {
 
-    var code =
-      response.getResponseCode();
+      response =
+        UrlFetchApp.fetch(
+          url,
+          {
+            method: 'post',
+            contentType: 'application/json',
+            payload: JSON.stringify(payload),
+            muteHttpExceptions: true
+          }
+        );
 
-    var bodyText =
-      response.getContentText();
+      code =
+        response.getResponseCode();
+
+      bodyText =
+        response.getContentText();
+
+      // Rate limit / temporary overload → retry dengan backoff.
+      if ((code === 429 || code === 503) && attempt < maxAttempts) {
+        console.warn(
+          'Gemini TTS HTTP ' +
+          code +
+          ' attempt ' +
+          attempt +
+          ' — retry'
+        );
+        Utilities.sleep(1200 * attempt * attempt);
+        continue;
+      }
+
+      break;
+
+    }
 
 
     if (code < 200 || code >= 300) {

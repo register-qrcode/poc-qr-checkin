@@ -958,6 +958,19 @@ window.addEventListener('message', function (event) {
       'Gemini TTS error (check-in tetap valid):',
       event.data.message || event.data
     );
+    expectGeminiAudio = false;
+    // Fallback beep supaya petugas tetap dengar feedback.
+    if (lastResultKey.indexOf('CHECKED_IN|') === 0) {
+      playBeep('success');
+    } else if (lastResultKey.indexOf('ALREADY_CHECKED_IN|') === 0) {
+      playBeep('warn');
+    }
+    var statusEl = document.getElementById('status');
+    if (statusEl && statusEl.innerText) {
+      statusEl.innerText =
+        statusEl.innerText.replace(/ · .*$/, '') +
+        ' · suara TTS gagal (beep cadangan)';
+    }
   }
 });
 
