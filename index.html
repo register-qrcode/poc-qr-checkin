@@ -253,8 +253,9 @@ const WEB_APP_URL =
 
 const RESPONSE_TIMEOUT_MS = 15000;
 // Hasil + TTS Gemini sering 3–13 dtk; panel harus tetap terbaca & jangan di-cancel re-scan.
-const AUTO_NEXT_MS = 8000;
+const AUTO_NEXT_MS = 12000;
 const SAME_TOKEN_COOLDOWN_MS = 12000;
+const GEMINI_FALLBACK_MS = 10000;
 
 let scanner = null;
 let cameraRunning = false;
@@ -266,6 +267,8 @@ let audioCtx = null;
 let masterGain = null;
 let responseTimer = null;
 let autoNextTimer = null;
+let geminiFallbackTimer = null;
+let pendingSpeechText = '';
 let lastToken = '';
 let lastTokenAt = 0;
 let beepAudioSuccess = null;
@@ -275,6 +278,7 @@ let audioRequestId = 0;
 let audioPlayedForRequest = 0;
 let expectGeminiAudio = false;
 let lastResultKey = '';
+let geminiAudioPlayed = false;
 
 document.getElementById('soundButton').addEventListener('click', toggleSound);
 document.getElementById('startButton').addEventListener('click', function () {
@@ -558,18 +562,27 @@ function speakLocalIndonesian(text, force) {
     var utter = new SpeechSynthesisUtterance(text);
     utter.lang = 'id-ID';
     utter.rate = 1;
-    utter.pitch = 1;
+    utter.pitch = 1.05;
     utter.volume = Math.max(0.2, Math.min(1, soundVolume));
 
     var voices = window.speechSynthesis.getVoices() || [];
-    var idVoice =
+    var pick =
       voices.find(function (v) {
-        return v.lang && v.lang.toLowerCase().indexOf('id') === 0;
+        return (
+          v.lang &&
+          v.lang.toLowerCase().indexOf('id') === 0 &&
+          /female|wanita|woman|girl/i.test(v.name || '')
+        );
       }) ||
       voices.find(function (v) {
-        return /indonesia/i.test(v.name || '');
+        return /female|wanita|woman|zira|samantha|karen|moira|fiona/i.test(
+          v.name || ''
+        );
+      }) ||
+      voices.find(function (v) {
+        return v.lang && v.lang.toLowerCase().indexOf('id') === 0;
       });
-    if (idVoice) utter.voice = idVoice;
+    if (pick) utter.voice = pick;
 
     window.speechSynthesis.speak(utter);
   } catch (error) {
@@ -577,7 +590,14 @@ function speakLocalIndonesian(text, force) {
   }
 }
 
-/** Feedback lokal segera — tidak menunggu Gemini (sering 429 / lambat). */
+function clearGeminiFallbackTimer() {
+  if (geminiFallbackTimer) {
+    clearTimeout(geminiFallbackTimer);
+    geminiFallbackTimer = null;
+  }
+}
+
+/** Beep segera; tunggu Gemini TTS perempuan. Fallback lokal hanya jika Gemini gagal/lambat. */
 function playImmediateResultFeedback(kind, speechText) {
   if (!soundEnabled || soundVolume <= 0) return;
 
@@ -588,7 +608,21 @@ function playImmediateResultFeedback(kind, speechText) {
   } catch (e) {}
 
   playBeep(kind);
-  speakLocalIndonesian(speechText, false);
+  pendingSpeechText = String(speechText || '').trim();
+  geminiAudioPlayed = false;
+  clearGeminiFallbackTimer();
+
+  geminiFallbackTimer = setTimeout(function () {
+    if (!expectGeminiAudio || geminiAudioPlayed) return;
+    expectGeminiAudio = false;
+    speakLocalIndonesian(pendingSpeechText, false);
+    var statusEl = document.getElementById('status');
+    if (statusEl && statusEl.innerText.indexOf('Gemini') === -1) {
+      statusEl.innerText =
+        statusEl.innerText.replace(/ · .*$/, '') +
+        ' · suara cadangan (tunggu Gemini)';
+    }
+  }, GEMINI_FALLBACK_MS);
 }
 
 function playBeepWebAudio(kind) {
@@ -1061,6 +1095,7 @@ window.addEventListener('message', function (event) {
   }
 
   if (event.data.type === 'CHECKIN_AUDIO') {
+    clearGeminiFallbackTimer();
     handleCheckInAudio(event.data.audio);
     return;
   }
@@ -1071,13 +1106,16 @@ window.addEventListener('message', function (event) {
       event.data.message || event.data
     );
     expectGeminiAudio = false;
-    // Feedback lokal sudah diputar saat CHECKIN_RESULT.
+    clearGeminiFallbackTimer();
+    if (!geminiAudioPlayed && pendingSpeechText) {
+      speakLocalIndonesian(pendingSpeechText, false);
+    }
     var statusEl = document.getElementById('status');
     if (statusEl && /BERHASIL|SUDAH DIGUNAKAN/.test(statusEl.innerText || '')) {
       if (statusEl.innerText.indexOf('Gemini') === -1) {
         statusEl.innerText =
           statusEl.innerText.replace(/ · .*$/, '') +
-          ' · suara lokal (Gemini limit)';
+          ' · suara cadangan (Gemini error)';
       }
     }
   }
@@ -1096,6 +1134,8 @@ function handleCheckInAudio(audio) {
     }
     audioPlayedForRequest = key;
     expectGeminiAudio = false;
+    geminiAudioPlayed = true;
+    clearGeminiFallbackTimer();
     unlockAudio();
     playGeminiWavBase64(audio.wavBase64);
     return;
@@ -1118,6 +1158,8 @@ function handleCheckInAudio(audio) {
 
   audioPlayedForRequest = audioRequestId;
   expectGeminiAudio = false;
+  geminiAudioPlayed = true;
+  clearGeminiFallbackTimer();
 
   unlockAudio();
   playGeminiWavBase64(audio.wavBase64);

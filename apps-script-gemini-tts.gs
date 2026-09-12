@@ -45,11 +45,11 @@ function getTtsConfig_() {
 
     model:
       props.getProperty('GEMINI_TTS_MODEL') ||
-      'gemini-2.5-flash-preview-tts',
+      'gemini-3.1-flash-tts-preview',
 
     voice:
       props.getProperty('GEMINI_TTS_VOICE') ||
-      'Aoede',
+      'Kore',
 
     language:
       props.getProperty('GEMINI_TTS_LANGUAGE') ||
@@ -105,11 +105,11 @@ function synthesizeCheckInSpeech(text, statusKind) {
 
 
     var prompt =
-      'Anda adalah petugas registrasi event perempuan profesional. ' +
-      'Bahasa Indonesia. Natural, tidak seperti robot. ' +
-      'Tanpa musik, tanpa efek, tanpa kalimat tambahan. ' +
+      'Speak as a professional Indonesian female registration officer. ' +
+      'Natural warm female voice, clear Indonesian, not robotic. ' +
+      'No music, no sound effects, no extra words. ' +
       toneLine + ' ' +
-      'Ucapkan tepat kalimat berikut saja:\n' +
+      'Say exactly this sentence only:\n' +
       text;
 
 
