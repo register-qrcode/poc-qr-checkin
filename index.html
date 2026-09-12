@@ -250,9 +250,9 @@
 const WEB_APP_URL =
   'https://script.google.com/macros/s/AKfycbwbLyCiePd1Vw3CgxBz0GdSDgaxTWI8Fsg7XUaKYJIOuqDK0qIEtgkINVVq0ZsFR_gCMg/exec';
 
-const RESPONSE_TIMEOUT_MS = 20000;
-const AUTO_NEXT_MS = 1800;
-const SAME_TOKEN_COOLDOWN_MS = 5000;
+const RESPONSE_TIMEOUT_MS = 15000;
+const AUTO_NEXT_MS = 900;
+const SAME_TOKEN_COOLDOWN_MS = 2500;
 
 let scanner = null;
 let cameraRunning = false;
@@ -340,6 +340,9 @@ function toggleSound() {
     button.classList.add('active');
     button.innerText = 'SUARA AKTIF';
     unlockAudio();
+    if (window.speechSynthesis) {
+      window.speechSynthesis.cancel();
+    }
     playBeep('success');
   } else {
     button.classList.remove('active');
@@ -505,7 +508,9 @@ function playBeep(kind) {
     unlockAudio();
     prepareHtmlAudio();
 
-    const audio = kind === 'warn' ? beepAudioWarn : beepAudioSuccess;
+    const audio = kind === 'warn' || kind === 'failed'
+      ? beepAudioWarn
+      : beepAudioSuccess;
     audio.pause();
     audio.currentTime = 0;
     audio.muted = false;
@@ -514,17 +519,48 @@ function playBeep(kind) {
     const playPromise = audio.play();
     if (playPromise && playPromise.then) {
       playPromise.catch(function () {
-        playBeepWebAudio(kind);
+        playBeepWebAudio(kind === 'failed' ? 'warn' : kind);
       });
     }
   } catch (error) {
     console.log('Beep error:', error);
     try {
-      playBeepWebAudio(kind);
+      playBeepWebAudio(kind === 'failed' ? 'warn' : kind);
     } catch (e2) {
       console.log('WebAudio fallback error:', e2);
     }
   }
+}
+
+function speakFailed() {
+  if (!soundEnabled || soundVolume <= 0) return;
+  if (!window.speechSynthesis) {
+    playBeep('failed');
+    return;
+  }
+
+  try {
+    window.speechSynthesis.cancel();
+    const utter = new SpeechSynthesisUtterance('Failed');
+    utter.lang = 'en-US';
+    utter.rate = 1.05;
+    utter.pitch = 0.85;
+    utter.volume = Math.max(0, Math.min(1, soundVolume));
+    window.speechSynthesis.speak(utter);
+  } catch (error) {
+    console.log('Speech error:', error);
+    playBeep('failed');
+  }
+}
+
+function playCheckInSuccessSound() {
+  playBeep('success');
+}
+
+function playAlreadyOrFailSound() {
+  // "Sudah check-in" / invalid / error → voice "Failed"
+  speakFailed();
+  playBeep('failed');
 }
 
 function vibrateSuccess() {
@@ -567,10 +603,20 @@ function showResult(type, title, content) {
   document.getElementById('resetButton').style.display = 'block';
   document.getElementById('manualNextButton').style.display = 'block';
 
+  // Buka kunci scan berikutnya SEGERA (QR berbeda bisa langsung).
+  isProcessing = false;
+
   clearAutoNextTimer();
   autoNextTimer = setTimeout(function () {
-    readyForNextScan();
+    hideResultPanel();
+    setStatus('Status: SIAP SCAN');
   }, AUTO_NEXT_MS);
+}
+
+function hideResultPanel() {
+  document.getElementById('result').style.display = 'none';
+  document.getElementById('resetButton').style.display = 'none';
+  document.getElementById('manualNextButton').style.display = 'none';
 }
 
 function cameraErrorMessage(error) {
@@ -635,7 +681,7 @@ function beginCamera() {
   }
 
   const config = {
-    fps: 12,
+    fps: 20,
     qrbox: function (viewfinderWidth, viewfinderHeight) {
       const edge = Math.floor(Math.min(viewfinderWidth, viewfinderHeight) * 0.7);
       return { width: edge, height: edge };
@@ -675,10 +721,7 @@ function readyForNextScan() {
   clearAutoNextTimer();
   clearResponseTimer();
   isProcessing = false;
-
-  document.getElementById('result').style.display = 'none';
-  document.getElementById('resetButton').style.display = 'none';
-  document.getElementById('manualNextButton').style.display = 'none';
+  hideResultPanel();
 
   if (!cameraRunning) {
     beginCamera();
@@ -767,8 +810,8 @@ function handleCheckInResult(result) {
       '⚠ GAGAL TERHUBUNG KE SERVER',
       'Tidak ada respons dari server.'
     );
-    setStatus('Status: Gagal terhubung ke server');
-    playBeep('warn');
+    setStatus('Status: Gagal · siap scan berikutnya');
+    playAlreadyOrFailSound();
     return;
   }
 
@@ -788,8 +831,8 @@ function handleCheckInResult(result) {
       '</div>';
 
     showResult('success', '✓ CHECK-IN BERHASIL', content);
-    setStatus('Status: CHECK-IN BERHASIL · lanjut otomatis...');
-    playBeep('success');
+    setStatus('Status: BERHASIL · siap scan berikutnya');
+    playCheckInSuccessSound();
     vibrateSuccess();
     return;
   }
@@ -810,8 +853,8 @@ function handleCheckInResult(result) {
       '</div>';
 
     showResult('warning', '⚠ SUDAH CHECK-IN', content);
-    setStatus('Status: SUDAH CHECK-IN · lanjut otomatis...');
-    playBeep('warn');
+    setStatus('Status: SUDAH CHECK-IN · siap scan berikutnya');
+    playAlreadyOrFailSound();
     vibrateWarn();
     return;
   }
@@ -822,8 +865,8 @@ function handleCheckInResult(result) {
       '✕ QR TIDAK VALID',
       escapeHtml(result.message || 'QR Token tidak ditemukan.')
     );
-    setStatus('Status: QR TIDAK VALID · lanjut otomatis...');
-    playBeep('warn');
+    setStatus('Status: TIDAK VALID · siap scan berikutnya');
+    playAlreadyOrFailSound();
     return;
   }
 
@@ -832,8 +875,8 @@ function handleCheckInResult(result) {
     '⚠ GAGAL TERHUBUNG KE SERVER',
     escapeHtml(result.message || 'Silakan coba lagi.')
   );
-  setStatus('Status: Gagal terhubung ke server');
-  playBeep('warn');
+  setStatus('Status: Gagal · siap scan berikutnya');
+  playAlreadyOrFailSound();
 }
 
 function resetScanner() {
